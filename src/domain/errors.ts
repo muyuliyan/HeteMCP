@@ -1,5 +1,5 @@
 export type DomainErrorCode =
-  "TASK_NOT_FOUND" | "INVALID_TRANSITION" | "REVISION_CONFLICT" | "PROVIDER_FAILURE";
+  "TASK_NOT_FOUND" | "INVALID_TRANSITION" | "LEASE_LOST" | "REVISION_CONFLICT" | "PROVIDER_FAILURE";
 
 export class DomainError extends Error {
   public constructor(

@@ -3,7 +3,7 @@ import type { TaskRecord, TaskStatus } from "./schemas.js";
 
 const allowedTransitions: Readonly<Record<TaskStatus, readonly TaskStatus[]>> = {
   queued: ["running", "cancelled"],
-  running: ["blocked", "reviewing", "failed", "cancelled"],
+  running: ["queued", "blocked", "reviewing", "failed", "cancelled"],
   blocked: ["queued", "cancelled"],
   reviewing: ["succeeded", "failed", "cancelled"],
   succeeded: [],

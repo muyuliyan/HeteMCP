@@ -21,6 +21,7 @@ function createOrchestrator(provider: ModelProvider = new FakeProvider()): Orche
   return new Orchestrator(new InMemoryTaskRepository(), provider, {
     now: () => new Date("2026-01-01T00:00:00.000Z"),
     createId: () => ids[index++] ?? crypto.randomUUID(),
+    workerId: "test-worker",
   });
 }
 
@@ -80,6 +81,36 @@ class TimeoutProvider implements ModelProvider {
   }
 }
 
+class ControlledProvider implements ModelProvider {
+  public readonly name = "controlled";
+  public readonly started: Promise<void>;
+  readonly #markStarted: () => void;
+  readonly #result: Promise<AttemptResult>;
+  readonly #complete: (result: AttemptResult) => void;
+
+  public constructor() {
+    let markStarted: (() => void) | undefined;
+    let complete: ((result: AttemptResult) => void) | undefined;
+    this.started = new Promise((resolve) => {
+      markStarted = resolve;
+    });
+    this.#result = new Promise((resolve) => {
+      complete = resolve;
+    });
+    this.#markStarted = () => markStarted?.();
+    this.#complete = (result) => complete?.(result);
+  }
+
+  public execute(): Promise<AttemptResult> {
+    this.#markStarted();
+    return this.#result;
+  }
+
+  public complete(result: AttemptResult): void {
+    this.#complete(result);
+  }
+}
+
 describe("Orchestrator", () => {
   it("deduplicates task creation by idempotency key", async () => {
     const orchestrator = createOrchestrator();
@@ -95,6 +126,8 @@ describe("Orchestrator", () => {
 
     expect(completed.status).toBe("succeeded");
     expect(completed.provider).toBe("fake");
+    expect(completed.workerId).toBe("test-worker");
+    expect(completed.leaseOwner).toBeUndefined();
     expect(completed.result?.artifacts).toHaveLength(1);
     expect(completed.result?.checks).toEqual([
       expect.objectContaining({ name: "Unit tests pass", outcome: "passed" }),
@@ -144,5 +177,32 @@ describe("Orchestrator", () => {
     const cancelled = await orchestrator.cancelTask(task.id);
     expect(cancelled.status).toBe("cancelled");
     await expect(execution).resolves.toMatchObject({ status: "cancelled" });
+  });
+
+  it("rejects a stale result after the task lease is recovered", async () => {
+    const provider = new ControlledProvider();
+    const repository = new InMemoryTaskRepository();
+    let now = new Date("2026-01-01T00:00:00.000Z");
+    const orchestrator = new Orchestrator(repository, provider, {
+      now: () => now,
+      workerId: "stale-worker",
+      leaseDurationMs: 60_000,
+    });
+    const task = await orchestrator.createTask(createTaskInput());
+    const execution = orchestrator.runTask(task.id);
+    await provider.started;
+
+    now = new Date("2026-01-01T00:01:01.000Z");
+    await expect(orchestrator.recoverExpiredTasks()).resolves.toBe(1);
+    provider.complete({
+      status: "succeeded",
+      summary: "Late result",
+      artifacts: [{ kind: "log", uri: "memory://late-result" }],
+      checks: [{ name: "Unit tests pass", outcome: "passed" }],
+      usage: { inputTokens: 1, outputTokens: 1, costMicros: 0 },
+    });
+
+    await expect(execution).rejects.toMatchObject({ code: "LEASE_LOST" });
+    await expect(orchestrator.getTask(task.id)).resolves.toMatchObject({ status: "queued" });
   });
 });

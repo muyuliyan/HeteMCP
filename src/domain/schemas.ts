@@ -72,11 +72,15 @@ export const taskRecordSchema = z.object({
   status: taskStatusSchema,
   spec: taskSpecSchema,
   revision: z.number().int().nonnegative(),
+  attemptCount: z.number().int().nonnegative(),
   cancellationRequested: z.boolean(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   attemptId: z.uuid().optional(),
   provider: nonEmptyText.optional(),
+  workerId: nonEmptyText.optional(),
+  leaseOwner: nonEmptyText.optional(),
+  leaseExpiresAt: z.iso.datetime().optional(),
   result: attemptResultSchema.optional(),
 });
 
