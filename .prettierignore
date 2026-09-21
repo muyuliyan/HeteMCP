@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+.npm-cache/
+package-lock.json
+docs/architecture.md
+skill/heteromcp-context-governance/SKILL.md

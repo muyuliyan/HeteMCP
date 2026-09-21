@@ -1,6 +1,43 @@
 # HeteMCP
 
-A provider-neutral MCP architecture for personal multi-model workflows.
+HeteMCP 是一个面向个人多模型工作流的、供应商无关的 MCP 编排服务。
 
-- Architecture and engineering conventions: [`docs/architecture.md`](docs/architecture.md)
-- Context and handoff skill: [`skill/heteromcp-context-governance/SKILL.md`](skill/heteromcp-context-governance/SKILL.md)
+- [架构与工程规范](docs/architecture.md)
+- [上下文治理与交接 Skill](skill/heteromcp-context-governance/SKILL.md)
+
+## 当前实现
+
+- 严格类型的任务、上下文、产物和执行结果协议
+- 受状态机约束的 Orchestrator，支持幂等创建、执行去重、超时和取消
+- 带 revision 检查的内存任务仓储
+- 与供应商 SDK 解耦的 `ModelProvider` 接口及确定性 fake provider
+- 基于 stdio 的 MCP Server
+- 状态迁移、幂等、验收、取消、超时和 MCP 端到端测试
+
+当前提供以下 MCP 工具：
+
+| 工具              | 用途                        |
+| ----------------- | --------------------------- |
+| `create_task`     | 幂等创建任务并安排后台执行  |
+| `get_task`        | 查询任务状态和 attempt 信息 |
+| `cancel_task`     | 请求取消任务                |
+| `get_task_result` | 获取任务产物和验收结果      |
+
+## 开发与运行
+
+```bash
+npm install
+npm run check
+npm run build
+npm start
+```
+
+MCP 客户端应通过 `node dist/index.js` 启动服务。开发时可运行 `npm run dev`。
+
+`npm run check` 会依次执行类型检查、ESLint、格式检查和全部测试。
+
+## 当前限制
+
+- 任务保存在内存中，进程退出后不会保留。
+- fake provider 只用于验证编排链路，不会调用真实模型或执行代码修改。
+- PostgreSQL、lease 恢复、隔离 worker 和真实模型 adapter 将在后续里程碑实现。
