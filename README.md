@@ -2,7 +2,8 @@
 
 HeteMCP 是一个面向个人多模型工作流的、供应商无关的 MCP 编排服务。
 
-- [架构与工程规范](docs/architecture.md)
+- [Architecture and engineering rules](docs/architecture.md)
+- [架构与工程规范（中文）](docs/architecture.zh-CN.md)
 - [上下文治理与交接 Skill](skill/heteromcp-context-governance/SKILL.md)
 
 ## 当前实现

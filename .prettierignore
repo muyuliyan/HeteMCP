@@ -4,4 +4,5 @@ coverage/
 .npm-cache/
 package-lock.json
 docs/architecture.md
+docs/architecture.zh-CN.md
 skill/heteromcp-context-governance/SKILL.md
