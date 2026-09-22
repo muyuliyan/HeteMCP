@@ -46,6 +46,14 @@ HETEMCP_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/heteromcp
 
 服务启动时会自动执行幂等迁移，并恢复 lease 已过期的任务。测试使用 PGlite 验证 PostgreSQL 迁移、JSONB 和事务语义，无需本地 Docker。
 
+真实 PostgreSQL 集成测试使用 Docker Compose：
+
+```bash
+npm run test:integration:docker
+```
+
+该命令会启动临时 PostgreSQL、验证多连接并发 claim、重连恢复、migration 与索引，然后自动删除测试容器和临时数据。
+
 ## 当前限制
 
 - 未设置 `HETEMCP_DATABASE_URL` 时，任务只保存在内存中。

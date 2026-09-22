@@ -75,20 +75,24 @@ The repository currently provides:
 - a worker loop that recovers expired work and drains queued tasks;
 - idempotent PostgreSQL migrations;
 - shared repository contract tests for in-memory and PostgreSQL behavior;
+- a Docker Compose PostgreSQL harness with separate real-database integration tests;
 - MCP transport, state-machine, timeout, cancellation, recovery, and concurrency tests.
 
-Current verification baseline: 20 tests, strict type checking, ESLint, Prettier, production build, and zero known production dependency vulnerabilities.
+Current verification baseline: 20 fast tests, 6 real PostgreSQL integration tests, strict type checking, ESLint, Prettier, production build, and zero known production dependency vulnerabilities.
 
 ## 6. PostgreSQL Development Decision
 
 PostgreSQL remains the durable store. Its deployment mechanism is outside the domain boundary.
 
-- **Local development and real integration tests:** run standard PostgreSQL with Docker Compose.
-- **Fast repository contract tests:** retain PGlite for deterministic, container-free feedback.
-- **CI:** run fast tests on every change and a Docker PostgreSQL matrix for real multi-connection behavior.
-- **Production:** connect to any supported PostgreSQL deployment through `HETEMCP_DATABASE_URL`; do not assume Docker.
+| Concern | Decision and evidence |
+|---|---|
+| Fast feedback | PGlite runs the shared repository contract tests without a container. |
+| Real database | Docker Compose runs PostgreSQL 17 for local development and integration tests; production uses `HETEMCP_DATABASE_URL` and does not depend on Docker. |
+| Migration safety | A transaction-scoped advisory lock serializes metadata creation and all migration versions across concurrent service starts. |
+| Verified behavior | `npm run test:integration:docker` passed 6 tests: independent-pool claims, connection loss, repository restart, heartbeat lease extension, concurrent migration startup, and partial-index query plans. The runner always removes test containers and volumes. |
+| Operations | Use `npm run db:up` / `npm run db:down` for a retained local container; CI should run fast tests on every change and the real PostgreSQL suite before merge. |
 
-Docker integration must verify concurrent claims, connection loss, process restart, long-running heartbeat, migration concurrency, and index behavior. PGlite passing is useful evidence but is not a substitute for those tests.
+Stage 1 is complete. PGlite remains fast feedback, not a substitute for real PostgreSQL evidence.
 
 ## 7. Not Yet Implemented
 
@@ -109,7 +113,7 @@ The current fake provider does not call a model or modify code. Without `HETEMCP
 
 ## 8. Delivery Order
 
-1. Add Docker Compose PostgreSQL and real-database integration tests.
+1. [x] Add Docker Compose PostgreSQL and real-database integration tests.
 2. Build the isolated worker and durable artifact store; produce a real patch and test report with the fake provider.
 3. Add one OpenAI-compatible provider with normalized errors, streaming, usage, and budget enforcement.
 4. Add the deterministic evaluator and bounded retry policy.
@@ -127,4 +131,3 @@ The current fake provider does not call a model or modify code. Without `HETEMCP
 - Performance work reports throughput, P50/P95 latency, error rate, and resource cost.
 - Optimize context size, serialization, connection reuse, and batching before weakening boundaries.
 - Never persist credentials or unrestricted prompts/tool output in task records, logs, or handoffs.
-

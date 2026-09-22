@@ -11,11 +11,15 @@
     "build": "tsc -p tsconfig.build.json",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm test",
     "dev": "tsx watch src/index.ts",
+    "db:down": "docker compose down --volumes --remove-orphans",
+    "db:up": "docker compose up -d --wait postgres",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "start": "node dist/index.js",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:integration:docker": "node --experimental-strip-types scripts/run-postgres-integration.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

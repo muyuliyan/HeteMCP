@@ -3,6 +3,7 @@ dist/
 coverage/
 .npm-cache/
 package-lock.json
+compose.yaml
 docs/architecture.md
 docs/architecture.zh-CN.md
 skill/heteromcp-context-governance/SKILL.md

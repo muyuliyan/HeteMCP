@@ -1,0 +1,20 @@
+name: heteromcp
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: heteromcp_test
+      POSTGRES_USER: heteromcp
+      POSTGRES_PASSWORD: heteromcp_test_only
+    ports:
+      - "127.0.0.1:55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U heteromcp -d heteromcp_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    tmpfs:
+      - /var/lib/postgresql/data
+    restart: "no"
+

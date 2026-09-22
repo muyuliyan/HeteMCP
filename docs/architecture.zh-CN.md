@@ -75,20 +75,24 @@ MVP 优先保证任务可恢复、状态明确、权限可强制、结果可验�
 - 启动时恢复过期任务并持续消费队列的 Worker Loop；
 - 幂等 PostgreSQL migration；
 - 内存和 PostgreSQL 共用的 Repository 契约测试；
+- Docker Compose PostgreSQL 测试环境和独立的真实数据库集成测试；
 - MCP 传输、状态机、超时、取消、恢复和并发测试。
 
-当前验证基线：20 个测试、严格类型检查、ESLint、Prettier、生产构建，以及生产依赖零已知漏洞。
+当前验证基线：20 个快速测试、6 个真实 PostgreSQL 集成测试、严格类型检查、ESLint、Prettier、生产构建，以及生产依赖零已知漏洞。
 
 ## 6. PostgreSQL 开发决策
 
 PostgreSQL 继续作为持久化存储，部署方式不进入领域边界。
 
-- **本地开发和真实集成测试：** 使用 Docker Compose 运行标准 PostgreSQL。
-- **快速 Repository 契约测试：** 保留 PGlite，提供确定性、无容器的快速反馈。
-- **CI：** 每次改动运行快速测试，同时使用 Docker PostgreSQL 验证真实多连接行为。
-- **生产环境：** 通过 `HETEMCP_DATABASE_URL` 连接任意受支持的 PostgreSQL，不假设生产使用 Docker。
+| 关注点 | 决策与证据 |
+|---|---|
+| 快速反馈 | PGlite 无需容器即可运行共用的 Repository 契约测试。 |
+| 真实数据库 | 本地开发和集成测试通过 Docker Compose 运行 PostgreSQL 17；生产仅依赖 `HETEMCP_DATABASE_URL`，不绑定 Docker。 |
+| migration 安全 | 事务级 advisory lock 串行化 metadata 建表和全部 migration 版本，避免多实例同时启动时发生 DDL 竞态。 |
+| 已验证行为 | `npm run test:integration:docker` 的 6 个测试全部通过：独立连接池 claim、连接中断、Repository 重启、heartbeat 续租、migration 并发启动和部分索引查询计划；脚本始终清理测试容器及数据卷。 |
+| 日常操作 | 使用 `npm run db:up` / `npm run db:down` 保留或删除本地容器；CI 每次运行快速测试，并在合并前运行真实 PostgreSQL 测试。 |
 
-Docker 集成测试需要验证并发 claim、连接中断、进程重启、长时间 heartbeat、migration 并发和索引性能。PGlite 通过只能作为有效证据之一，不能替代真实 PostgreSQL 测试。
+第 1 阶段已完成。PGlite 只承担快速反馈，不能替代真实 PostgreSQL 证据。
 
 ## 7. 尚未实现
 
@@ -109,7 +113,7 @@ Docker 集成测试需要验证并发 claim、连接中断、进程重启、长�
 
 ## 8. 实施顺序
 
-1. 增加 Docker Compose PostgreSQL 和真实数据库集成测试。
+1. [x] 增加 Docker Compose PostgreSQL 和真实数据库集成测试。
 2. 实现隔离 Worker 与 Artifact Store，让 fake provider 能产出真实 patch 和测试报告。
 3. 接入一个 OpenAI-compatible Provider，实现统一错误、流式响应、用量和预算约束。
 4. 实现确定性 Evaluator 和有限重试策略。
@@ -127,4 +131,3 @@ Docker 集成测试需要验证并发 claim、连接中断、进程重启、长�
 - 性能变更需报告吞吐、P50/P95 延迟、错误率和资源成本。
 - 在削弱边界之前，优先优化上下文体积、序列化、连接复用和批处理。
 - 禁止把密钥、无限制提示内容或工具输出写入任务记录、日志或交接信息。
-

@@ -28,26 +28,29 @@ const migrations = [
 ] as const;
 
 export async function runMigrations(database: SqlDatabase): Promise<void> {
-  await database.query(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      version integer PRIMARY KEY,
-      applied_at timestamptz NOT NULL DEFAULT now()
-    )
-  `);
+  await database.transaction(async (executor) => {
+    // The lock must precede even the metadata-table DDL: concurrent CREATE TABLE
+    // can still race in PostgreSQL system catalogs despite IF NOT EXISTS.
+    await executor.query("SELECT pg_advisory_xact_lock($1, $2)", [1212501328, 1]);
+    await executor.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version integer PRIMARY KEY,
+        applied_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
 
-  for (const migration of migrations) {
-    await database.transaction(async (executor) => {
+    for (const migration of migrations) {
       const applied = await executor.query<{ version: number }>(
         "SELECT version FROM schema_migrations WHERE version = $1",
         [migration.version],
       );
-      if (applied.rowCount > 0) return;
+      if (applied.rowCount > 0) continue;
 
       for (const statement of migration.statements) await executor.query(statement);
       await executor.query(
         "INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING",
         [migration.version],
       );
-    });
-  }
+    }
+  });
 }
