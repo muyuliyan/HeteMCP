@@ -24,6 +24,7 @@ export interface DeepSeekHeadlessOptions {
   prefixArgs?: readonly string[];
   env: Readonly<Record<string, string>>;
   maxOutputBytes?: number;
+  desktopLegacy?: { version: "0.2.1-rc.2"; policyPatch: string };
 }
 
 export class DeepSeekHeadlessAdapter implements AgentHarness {
@@ -34,6 +35,9 @@ export class DeepSeekHeadlessAdapter implements AgentHarness {
     this.#limit = options.maxOutputBytes ?? 8 * 1024 * 1024;
     if (!isAbsolute(options.executable) || !Number.isSafeInteger(this.#limit) || this.#limit < 1) {
       throw new Error("Harness requires an absolute executable and a positive output limit");
+    }
+    if (options.desktopLegacy && !isAbsolute(options.desktopLegacy.policyPatch)) {
+      throw new Error("Legacy desktop execution requires an absolute audited policy patch");
     }
   }
 
@@ -54,11 +58,9 @@ export class DeepSeekHeadlessAdapter implements AgentHarness {
         this.options.executable,
         [
           ...(this.options.prefixArgs ?? []),
-          "headless",
-          "--permission-mode",
-          "workspace-write",
-          "--approval-policy",
-          "never",
+          ...(this.options.desktopLegacy
+            ? ["--profile", "headless", "--patch", this.options.desktopLegacy.policyPatch]
+            : ["headless", "--permission-mode", "workspace-write", "--approval-policy", "never"]),
           "--json",
           "-",
         ],
@@ -101,9 +103,15 @@ export class DeepSeekHeadlessAdapter implements AgentHarness {
           } else {
             if (!sessionId) throw new Error("Missing initial session");
             if (event.type === "final") {
-              const event = finalSchema.parse(raw);
-              if (event.sessionId !== sessionId) throw new Error("Session mismatch");
-              finalKind = event.reason?.kind ?? null;
+              if (this.options.desktopLegacy) {
+                z.object({ type: z.literal("final"), text: z.string() }).parse(raw);
+                // Inspected 0.2.1-rc.2 runner exits zero only for completed turns.
+                finalKind = "completed";
+              } else {
+                const event = finalSchema.parse(raw);
+                if (event.sessionId !== sessionId) throw new Error("Session mismatch");
+                finalKind = event.reason?.kind ?? null;
+              }
             }
           }
         } catch {

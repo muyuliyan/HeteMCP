@@ -10,6 +10,9 @@ import { FakeProvider } from "./infrastructure/providers/fake-provider.js";
 import { InMemoryTaskRepository } from "./infrastructure/repositories/in-memory-task-repository.js";
 import { PostgresTaskRepository } from "./infrastructure/repositories/postgres-task-repository.js";
 import { createMcpServer } from "./transport/mcp/server.js";
+import { FileGenerationExecutor } from "./application/file-generation-executor.js";
+import { createDesktopHarness } from "./infrastructure/harnesses/deepseek-headless/desktop.js";
+import { resolve } from "node:path";
 
 interface RepositoryRuntime {
   repository: TaskRepository;
@@ -27,7 +30,26 @@ async function createRepositoryRuntime(): Promise<RepositoryRuntime> {
 
 async function main(): Promise<void> {
   const runtime = await createRepositoryRuntime();
-  const provider = new FakeProvider();
+  const applicationDirectory = process.env.HETEMCP_DSH_DESKTOP;
+  const credentialsPath = process.env.HETEMCP_CREDENTIALS_PATH;
+  if (applicationDirectory && (!credentialsPath || process.env.HETEMCP_ALLOW_UNMETERED !== "1")) {
+    throw new Error(
+      "Desktop file generation requires credentials path and explicit HETEMCP_ALLOW_UNMETERED=1",
+    );
+  }
+  const artifactRoot = resolve(process.env.HETEMCP_ARTIFACT_ROOT ?? ".heteromcp/artifacts");
+  const provider =
+    applicationDirectory && credentialsPath
+      ? new FileGenerationExecutor(
+          createDesktopHarness({
+            applicationDirectory,
+            credentialsPath,
+            runtimeHome: resolve(".heteromcp/dsh-home"),
+            policyPatch: resolve("config/deepseek-desktop-0.2.1.patch.yml"),
+          }),
+          artifactRoot,
+        )
+      : new FakeProvider();
   const orchestrator = new Orchestrator(runtime.repository, provider);
   const workerLoop = new WorkerLoop(orchestrator);
   const server = createMcpServer(orchestrator);

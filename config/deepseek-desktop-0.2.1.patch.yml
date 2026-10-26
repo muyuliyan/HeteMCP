@@ -1,0 +1,40 @@
+# Audited against Desktop 0.2.1-rc.2. Applied only to the private HeteMCP home.
+- id: sandbox-policy
+  config:
+    mode: workspace-write
+    workspaceRoot: !!js process.cwd()
+- id: approval
+  config:
+    policy: never
+- id: permission
+  config:
+    defaultPreset: workspace-write
+    presets:
+      workspace-write:
+        sandbox: workspace-write
+        approval: never
+- id: credentials
+  disabled: false
+  config:
+    path: !!js process.env.HETEMCP_CREDENTIALS_PATH
+    watch: false
+- id: agent-default-model
+  config:
+    provider: deepseek-official
+    model: deepseek-flash
+- id: session-title-llm
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-bash
+  disabled: true
+- id: tool-web
+  disabled: true
+- id: tool-subagent
+  disabled: true
+- id: tool-subagent-fork
+  disabled: true
+- id: tool-workflow
+  disabled: true
+- id: tool-plugin-manager
+  disabled: true

@@ -37,8 +37,12 @@ export const taskSpecSchema = z.object({
 });
 
 export const artifactSchema = z.object({
-  kind: z.enum(["patch", "commit", "test-report", "log"]),
+  kind: z.enum(["patch", "commit", "test-report", "log", "source"]),
   uri: nonEmptyText,
+  sha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
 });
 
 export const checkResultSchema = z.object({
@@ -56,6 +60,7 @@ export const attemptResultSchema = z.object({
     inputTokens: z.number().int().nonnegative(),
     outputTokens: z.number().int().nonnegative(),
     costMicros: z.number().int().nonnegative(),
+    measured: z.boolean().optional(),
   }),
   error: z
     .object({

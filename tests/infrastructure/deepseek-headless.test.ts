@@ -28,6 +28,26 @@ function adapter(script: string, maxOutputBytes?: number) {
 }
 
 describe("DeepSeek headless process boundary", () => {
+  it.each([0, 1])("validates explicit legacy completion with exit %i", async (exitCode) => {
+    const patch = process.execPath;
+    const output = session + '\n{"type":"final","text":"done"}';
+    const script = `process.stdin.resume(); process.stdin.on('end', () => {
+      if (JSON.stringify(process.argv.slice(1)) !== ${JSON.stringify(
+        JSON.stringify(["--profile", "headless", "--patch", patch, "--json", "-"]),
+      )}) process.exit(9);
+      process.stdout.write(${JSON.stringify(output)}); process.exitCode = ${String(exitCode)};
+    });`;
+    const harness = new DeepSeekHeadlessAdapter({
+      executable: process.execPath,
+      prefixArgs: ["-e", script, "--"],
+      env: {},
+      desktopLegacy: { version: "0.2.1-rc.2", policyPatch: patch },
+    });
+    await expect(harness.execute(request())).resolves.toMatchObject({
+      status: exitCode === 0 ? "completed" : "failed",
+      exitCode,
+    });
+  });
   it("sends literal stdin and fixed permission flags and requires a matching completion", async () => {
     const script = `let prompt = ''; process.stdin.setEncoding('utf8');
       process.stdin.on('data', c => prompt += c);

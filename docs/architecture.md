@@ -133,15 +133,38 @@ Local runtime probe: `D:\dsh\dddd` contains Desktop `0.2.1-rc.2`. Its bundled CL
 `DeepSeek Harness.exe` with `ELECTRON_RUN_AS_NODE=1`. Headless help works. However, an
 empty-stdin invocation with the intended flags exits 1 with `unknown option '--permission-mode'`.
 Inspection of the bundled runner also shows a legacy final event containing only `type/text`.
-This installed release is not compatible with the current adapter. A verified version-specific
-permission profile/protocol or a compatible standalone CLI is required before a real run.
-Do not extract or modify the desktop installation to work around this.
+The explicit desktop compatibility mode now supplies an audited profile overlay instead of
+those unsupported flags. `config/deepseek-desktop-0.2.1.patch.yml` pins workspace-write and
+approval never, enables the existing credential provider by path, and disables shell, web,
+delegation and plugin-management tools. The inspected legacy runner exits zero only for a
+completed turn; this mode requires both that exit code and a valid legacy final event following
+the initial session event. Modern protocol validation remains strict. The installation is unchanged.
 
-This adapter is not yet wired into `src/index.ts`: workspace preparation, artifact storage,
-independent command/path evaluation and enforceable budgets must precede production dispatch.
-No real DeepSeek run has been verified. Structured acceptance/workspace changes will use a
-versioned task contract; MCP waiting/progress and a shared-service CLI follow integration.
-Do not infer that a worktree alone enforces filesystem access restrictions.
+`src/index.ts` now offers an opt-in `deepseek-file-generation` executor via
+`HETEMCP_DSH_DESKTOP`, `HETEMCP_CREDENTIALS_PATH`, and `HETEMCP_ALLOW_UNMETERED=1`.
+The Orchestrator depends on `TaskExecutor`; the old ModelProvider name remains a compatibility
+alias. `AgentHarness` reports execution only. `FileGenerationExecutor` creates a fresh empty
+per-attempt directory, independently verifies one nonempty regular file (maximum 128 KiB), and
+stores source/report artifacts with SHA-256 hashes. This new-file profile does not expose the
+checkout to the worker and does not publish changes. It accepts only `generated-file-scope`;
+task success does not claim compilation or semantic correctness. The supervisor runs those
+checks separately before explicit publication. V1 usage adds `measured=false`, artifact metadata
+adds optional SHA-256 and a `source` kind. Token/cost values remain advisory in this explicitly
+unmetered profile; no production budget enforcement is claimed. MCP records remain process-local
+without PostgreSQL, while the supervisor saves the final record under `.heteromcp/runs`.
+
+Real verification on 2026-10-26: MCP stdio -> Orchestrator -> Desktop 0.2.1-rc.2 -> generated
+`bubble.cpp`, task `4be8fde4-a5ac-4333-ab97-a745eec0091d`, session
+`session-4f4df263-5835-4747-91a4-f76e76f48482`. The independent supervisor compiled with
+C++17, `-Wall -Wextra -Werror -pedantic`, passed 57 valid and 3 invalid input cases, and copied
+the worker's exact bytes to `test/bubble.cpp`. SHA-256:
+`c9a3afcf0bbc5e17b1510a5fbcedb74629be41367bc49f5d50b130fcf4d1e3a5`.
+See `docs/deepseek-smoke.md` for reproduction and evidence paths.
+
+General repository worktrees, structured acceptance commands in a versioned task contract,
+retry/budget enforcement and progress streaming remain future work. A worktree alone does
+not enforce filesystem restrictions. Runtime session data lives in a private ignored directory;
+it is not included in MCP responses or committed artifacts.
 
 Checkpoints:
 

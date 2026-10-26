@@ -54,8 +54,17 @@ npm run test:integration:docker
 
 该命令会启动临时 PostgreSQL、验证多连接并发 claim、重连恢复、migration 与索引，然后自动删除测试容器和临时数据。
 
+## DeepSeek Harness 真实连通性测试
+
+已接入 Desktop `0.2.1-rc.2` 的显式兼容模式，可通过 MCP stdio 将新文件生成任务交给
+DeepSeek。`test/bubble.cpp` 由 DeepSeek 实际编写，Codex 独立编译并通过 60 个行为测试后
+原样复制到目标路径。配置与复现步骤见 [DeepSeek smoke test](docs/deepseek-smoke.md)。
+
+这是主动启用的单文件测试模式：独立工作区、产物哈希和文件范围验收已实现，尚不具备通用
+仓库修改、自动合并或 token/费用上限强制执行能力。默认启动仍使用 fake provider。
+
 ## 当前限制
 
 - 未设置 `HETEMCP_DATABASE_URL` 时，任务只保存在内存中。
 - fake provider 只用于验证编排链路，不会调用真实模型或执行代码修改。
-- 隔离 worker 和真实模型 adapter 将在后续里程碑实现。
+- 通用仓库 worker、生产预算控制及完整验收流水线仍待实现；单文件 Harness 测试模式已可用。

@@ -127,12 +127,26 @@ Windows 使用 Node 绝对路径和固定版本 CLI 入口参数，不通过 she
 本机 `D:\dsh\dddd` 是 Desktop `0.2.1-rc.2`，可通过 `ELECTRON_RUN_AS_NODE=1` 和桌面
 可执行文件启动包内 `resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js`。
 帮助命令成功，但带计划权限参数的空输入探测返回 `unknown option '--permission-mode'`；
-包内源码的 final 事件也只有 type/text。本版本尚不兼容当前适配器，真实执行前需要验证
-该版本专用的权限 profile/协议，或使用兼容的独立 CLI；不能默默删除权限参数。
+包内源码的 final 事件也只有 type/text。现在通过显式旧版模式和经核对的 profile overlay
+兼容：使用 `--profile headless --patch ...`，固定 workspace-write、approval never，禁用
+shell、网络工具、委派和插件管理工具。旧版以退出码 0 表示回合完成，因此要求初始 session、
+合法 final 和退出码 0 同时成立；现代协议仍严格检查 reason。桌面安装和个人 profile 未修改。
 
-适配器尚未接入 `src/index.ts`。实际派发前仍需实现独立工作区、带哈希的产物存储、
-命令和路径验收、可强制预算。当前没有真实 DeepSeek 调用证据，原 fake 链路仍是模拟。
-结构化验收与工作区语义将采用新版任务协议。worktree 本身不是文件权限沙箱。
+`src/index.ts` 已通过显式环境配置接入 `deepseek-file-generation`。Orchestrator 依赖
+`TaskExecutor`，旧 ModelProvider 保留兼容别名。新 executor 为每次 attempt 创建空工作区，
+独立检查唯一非空普通文件（最大 128 KiB），保存源码及带 SHA-256 的报告。该模式不接触
+主仓库且不自动发布；只接受 `generated-file-scope`，不将生成成功等同于编译或行为正确。
+独立 supervisor 验收后才显式复制产物。usage 增加 measured=false，表示未知而非免费。
+启用时必须设置 `HETEMCP_ALLOW_UNMETERED=1`；该测试模式强制超时但不强制 token/费用预算。
+
+2026-10-26 已真实验证 MCP stdio → HeteMCP → DeepSeek Harness → bubble.cpp：任务 ID
+`4be8fde4-a5ac-4333-ab97-a745eec0091d`，session 为
+`session-4f4df263-5835-4747-91a4-f76e76f48482`。Codex 仅设计和验收 C++，DeepSeek 编写源码。
+严格 C++17 编译及 57 个有效输入、3 个非法输入测试通过，原始字节已复制到 `test/bubble.cpp`。
+复现步骤及证据见 [deepseek-smoke.md](deepseek-smoke.md)。
+
+通用仓库 worktree、结构化命令验收、新版任务协议、预算强制和进度流仍待实现。
+worktree 本身不是文件权限沙箱；运行时会话留在忽略的私有目录，不进入 MCP 返回内容。
 
 推进顺序：进程协议与模拟子进程测试 → 工作区/产物/验收及编排集成 → MCP 等待和进度、
 共用 application service 的 CLI 与真实 coding 任务验收。下列通用路线中超出此目标的部分暂缓。

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "objective": "Write bubble.cpp as a standalone C++17 program implementing ascending bubble sort manually (no std::sort or other sorting library). Read an integer n, then n signed 32-bit integers from stdin; output the sorted integers separated by single spaces and a trailing newline, with no prompts. Support n=0, duplicates, negatives, already sorted and reverse order. Use an early-exit optimization when no swaps occur. Reject negative n or incomplete input with a nonzero exit code. Include a short comment explaining time and space complexity. Write the file yourself using filesystem tools; do not just print code in your response.",
+  "allowedPaths": ["bubble.cpp"],
+  "excludedPaths": [],
+  "acceptance": ["generated-file-scope"],
+  "workerProfile": "deepseek-file-generation",
+  "budget": { "maxInputTokens": 20000, "maxOutputTokens": 4000, "maxCostMicros": 1000000 },
+  "timeoutMs": 120000,
+  "context": {
+    "summary": "A real connectivity test: Codex designed the behavior; DeepSeek must author the implementation. HeteMCP collects the new source in an isolated workspace. Codex will independently compile/test before publishing it to D:/workre/HeteMCP/test/bubble.cpp. Token/cost fields are advisory for this explicitly unmetered smoke profile; wall-clock timeout is enforced.",
+    "decisions": [],
+    "evidence": [],
+    "openQuestions": []
+  }
+}

@@ -9,7 +9,7 @@ import {
   type TaskRecord,
 } from "../domain/schemas.js";
 import { isTerminalStatus, transitionTask } from "../domain/task.js";
-import type { ModelProvider } from "./ports/model-provider.js";
+import type { TaskExecutor } from "./ports/task-executor.js";
 import type { TaskClaim, TaskRepository } from "./ports/task-repository.js";
 
 export interface OrchestratorOptions {
@@ -29,7 +29,7 @@ export class Orchestrator {
 
   public constructor(
     private readonly repository: TaskRepository,
-    private readonly provider: ModelProvider,
+    private readonly provider: TaskExecutor,
     options: OrchestratorOptions = {},
   ) {
     this.#now = options.now ?? (() => new Date());
