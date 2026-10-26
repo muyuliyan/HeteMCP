@@ -113,6 +113,44 @@ The current fake provider does not call a model or modify code. Without `HETEMCP
 
 ## 8. Delivery Order
 
+### Codex/CLI specialization (2026-10-26)
+
+The immediate target is supervised DeepSeek Harness execution. Retain task persistence,
+leases and MCP; add an `AgentHarness` port for complete agent runs, separate from model
+inference and independent acceptance. `HarnessOutcome.completed` means a completed agent
+turn, not a successful HeteMCP task. The existing fake-provider path remains a simulation.
+
+The first implementation checkpoint adds `DeepSeekHeadlessAdapter`: an explicitly configured
+absolute executable, fixed headless permission flags, stdin prompts, explicit environment,
+bounded NDJSON/diagnostics, matching session/final validation and process-tree termination.
+On Windows use an absolute Node executable and pinned CLI entrypoint as prefix arguments;
+npm `.cmd` shims are not shell-free executables. The caller owns executable/version selection
+and credential configuration. Raw tool output and reasoning are discarded in this checkpoint.
+Errors are sanitized and no automatic retry is performed.
+
+Local runtime probe: `D:\dsh\dddd` contains Desktop `0.2.1-rc.2`. Its bundled CLI is
+`resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js`, launched by
+`DeepSeek Harness.exe` with `ELECTRON_RUN_AS_NODE=1`. Headless help works. However, an
+empty-stdin invocation with the intended flags exits 1 with `unknown option '--permission-mode'`.
+Inspection of the bundled runner also shows a legacy final event containing only `type/text`.
+This installed release is not compatible with the current adapter. A verified version-specific
+permission profile/protocol or a compatible standalone CLI is required before a real run.
+Do not extract or modify the desktop installation to work around this.
+
+This adapter is not yet wired into `src/index.ts`: workspace preparation, artifact storage,
+independent command/path evaluation and enforceable budgets must precede production dispatch.
+No real DeepSeek run has been verified. Structured acceptance/workspace changes will use a
+versioned task contract; MCP waiting/progress and a shared-service CLI follow integration.
+Do not infer that a worktree alone enforces filesystem access restrictions.
+
+Checkpoints:
+
+1. Harness/process protocol contract and simulated subprocess tests.
+2. Per-attempt workspace, hashed artifacts, evaluator and orchestration integration.
+3. MCP bounded wait/progress, CLI and a real bounded coding-task acceptance run.
+
+The general roadmap below remains deferred where it exceeds this specialization.
+
 1. [x] Add Docker Compose PostgreSQL and real-database integration tests.
 2. Build the isolated worker and durable artifact store; produce a real patch and test report with the fake provider.
 3. Add one OpenAI-compatible provider with normalized errors, streaming, usage, and budget enforcement.

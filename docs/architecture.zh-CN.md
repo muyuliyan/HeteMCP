@@ -113,6 +113,30 @@ PostgreSQL 继续作为持久化存储，部署方式不进入领域边界。
 
 ## 8. 实施顺序
 
+### Codex/CLI 特化（2026-10-26）
+
+近期目标是通过 headless 进程监督 DeepSeek Harness。保留任务仓储、租约与 MCP，
+增加 `AgentHarness` 执行端口，将完整 agent 执行与模型推理、独立验收分开。
+`HarnessOutcome.completed` 仅表示 agent 回合结束，不代表任务验收通过。
+
+首个检查点加入 `DeepSeekHeadlessAdapter`：显式绝对可执行路径、固定权限参数、
+stdin 任务输入、显式环境、有限 NDJSON/诊断输出、session/终态校验与进程树终止。
+Windows 使用 Node 绝对路径和固定版本 CLI 入口参数，不通过 shell 启动 npm `.cmd`。
+调用方负责版本与凭据配置；当前丢弃原始工具输出和推理，错误脱敏且不自动重试。
+
+本机 `D:\dsh\dddd` 是 Desktop `0.2.1-rc.2`，可通过 `ELECTRON_RUN_AS_NODE=1` 和桌面
+可执行文件启动包内 `resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js`。
+帮助命令成功，但带计划权限参数的空输入探测返回 `unknown option '--permission-mode'`；
+包内源码的 final 事件也只有 type/text。本版本尚不兼容当前适配器，真实执行前需要验证
+该版本专用的权限 profile/协议，或使用兼容的独立 CLI；不能默默删除权限参数。
+
+适配器尚未接入 `src/index.ts`。实际派发前仍需实现独立工作区、带哈希的产物存储、
+命令和路径验收、可强制预算。当前没有真实 DeepSeek 调用证据，原 fake 链路仍是模拟。
+结构化验收与工作区语义将采用新版任务协议。worktree 本身不是文件权限沙箱。
+
+推进顺序：进程协议与模拟子进程测试 → 工作区/产物/验收及编排集成 → MCP 等待和进度、
+共用 application service 的 CLI 与真实 coding 任务验收。下列通用路线中超出此目标的部分暂缓。
+
 1. [x] 增加 Docker Compose PostgreSQL 和真实数据库集成测试。
 2. 实现隔离 Worker 与 Artifact Store，让 fake provider 能产出真实 patch 和测试报告。
 3. 接入一个 OpenAI-compatible Provider，实现统一错误、流式响应、用量和预算约束。

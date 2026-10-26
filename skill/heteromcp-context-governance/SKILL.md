@@ -27,6 +27,26 @@ Before changing code:
 - Use comments to explain invariants, trade-offs, or surprising constraints. Do not narrate syntax.
 - Update tests and the architecture document only when the public contract or a durable decision changes.
 
+## Codex/CLI to DeepSeek Harness
+
+Specialize incrementally: retain MCP, task state, repositories and leases. The coordinator plans and reviews; HeteMCP supervises execution; DeepSeek Harness runs bounded coding tasks. Keep provider independence at the harness adapter boundary.
+
+- Target flow: MCP/CLI -> Orchestrator -> isolated workspace -> AgentHarness -> collected artifacts -> deterministic Evaluator -> result.
+- Model inference and agent execution are different ports. An `AgentHarness` returns process/session outcome, never authoritative acceptance checks. Assemble `AttemptResult` only after independent validation; worker prose and exit zero alone cannot prove success.
+- Start with the documented headless process interface; defer SDK sessions until measured need. Pin the deployed harness version and verify its CLI/protocol with an actual invocation; help alone may ignore unsupported arguments. Use stdin for prompts, NDJSON stdout, bounded diagnostics, explicit cwd/environment, and no shell interpolation. Require exit zero plus `final.reason.kind === completed`; preserve session identity and typed failures. Desktop 0.2.1-rc.2 lacks both the current final-event schema and `--permission-mode`: treat it as incompatible until a version-specific permission profile and protocol are verified. Never silently drop permission flags or relax completion validation.
+- Cancellation must terminate and await the process tree before session reuse. Map approvals requiring a person to blocked; never bypass them. Do not advertise enforceable token/cost ceilings until the runtime actually enforces them.
+- Give each attempt a separate worktree and durable artifact directory. Worktrees isolate edits, not host access; apply runtime permissions separately. Never grant shared Git metadata automatically or publish worker changes automatically.
+- Collect actual patches and reports with hashes. Run structured, authorized acceptance commands and changed-path checks independently. Preserve V1 stored tasks; introduce a versioned contract when acceptance/workspace semantics change.
+- Keep MCP and CLI on the same application service. Add bounded waiting and cursor-based progress after execution works; defer routers, task graphs, dashboards and distributed services.
+
+Delivery checkpoints (verify each before advancing):
+
+1. Harness port, headless adapter and process/protocol tests; probe the installed runtime if available.
+2. Isolated workspace, artifact store and independent evaluator, then orchestration integration.
+3. MCP waiting/progress and CLI entry point; real bounded coding-task acceptance.
+
+Reference: [official headless contract](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/bundle/headless/README.md). Record verified versus pending capabilities in `docs/architecture.md`; simulated harness tests are not evidence of a real model run.
+
 ## Context Switch
 
 Create a handoff before changing model, agent, task, or context window. Use this compact schema:
