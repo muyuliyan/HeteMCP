@@ -27,27 +27,40 @@ Before changing code:
 - Use comments to explain invariants, trade-offs, or surprising constraints. Do not narrate syntax.
 - Update tests and the architecture document only when the public contract or a durable decision changes.
 
-## Codex/CLI to DeepSeek Harness
+## Codex/MCP to DeepSeek Harness
 
 Specialize incrementally: retain MCP, task state, repositories and leases. The coordinator plans and reviews; HeteMCP supervises execution; DeepSeek Harness runs bounded coding tasks. Keep provider independence at the harness adapter boundary.
 
-- Target flow: MCP/CLI -> Orchestrator -> isolated workspace -> AgentHarness -> collected artifacts -> deterministic Evaluator -> result.
+- Current flow: Codex/MCP client -> Orchestrator -> TaskExecutor -> FileGenerationExecutor -> fresh attempt workspace -> AgentHarness/DSH -> independent file-scope checks and hashed artifacts -> result. Supervisor compilation/behavior checks and explicit publication follow separately. Codex is the supervisor; no Codex execution adapter is implemented.
 - Model inference and agent execution are different ports. An `AgentHarness` returns process/session outcome, never authoritative acceptance checks. Assemble `AttemptResult` only after independent validation; worker prose and exit zero alone cannot prove success.
 - Start with the documented headless process interface; defer SDK sessions until measured need. Pin the deployed harness version and verify its CLI/protocol with an actual invocation; help alone may ignore unsupported arguments. Use stdin for prompts, NDJSON stdout, bounded diagnostics, explicit cwd/environment, and no shell interpolation. Current protocol requires exit zero plus `final.reason.kind === completed`. Desktop 0.2.1-rc.2 instead uses the explicit legacy adapter and audited `config/deepseek-desktop-0.2.1.patch.yml`: `--profile headless --patch ...`, workspace-write, approval never, final text plus exit zero (verified runner completion semantics). Never infer legacy mode from malformed output. Preserve session identity and typed failures.
 - Cancellation must terminate and await the process tree before session reuse. Map approvals requiring a person to blocked; never bypass them. Do not advertise enforceable token/cost ceilings until the runtime actually enforces them.
-- Give each attempt a separate worktree and durable artifact directory. Worktrees isolate edits, not host access; apply runtime permissions separately. Never grant shared Git metadata automatically or publish worker changes automatically.
-- For the opt-in new-file connectivity profile, a fresh empty workspace replaces a repository worktree: the worker does not need checkout access. It supports one plain filename and independently checks scope/size/hash. Supervisor compilation and behavior checks precede explicit publication. Preserve worker-authored bytes when the user assigns coding exclusively to DeepSeek.
+- A future repository worker needs a separate worktree and durable artifact directory per attempt. Worktrees isolate edits, not host access; apply runtime permissions separately. Never grant shared Git metadata automatically or publish worker changes automatically.
+- For the supported opt-in new-file profile, a fresh empty workspace replaces a repository worktree: the worker does not need checkout access. It supports one plain `.cpp`, `.txt` or `.md` filename, no excluded paths, exactly `generated-file-scope` acceptance, and one nonempty regular file at most 128 KiB. It independently checks scope/size/hash. Supervisor compilation and behavior checks precede explicit publication. Preserve worker-authored bytes when the user assigns coding exclusively to DeepSeek.
 - The desktop smoke profile cannot enforce V1 token/cost ceilings; require `HETEMCP_ALLOW_UNMETERED=1`, report `usage.measured=false`, and enforce the wall-clock deadline. This is not a general budgeted production executor.
 - Collect actual patches and reports with hashes. Run structured, authorized acceptance commands and changed-path checks independently. Preserve V1 stored tasks; introduce a versioned contract when acceptance/workspace semantics change.
 - Keep MCP and CLI on the same application service. Add bounded waiting and cursor-based progress after execution works; defer routers, task graphs, dashboards and distributed services.
 
-Delivery checkpoints (verify each before advancing):
+### Runtime checks
 
-1. Harness port, headless adapter and process/protocol tests; probe the installed runtime if available.
-2. Isolated workspace, artifact store and independent evaluator, then orchestration integration.
-3. MCP waiting/progress and CLI entry point; real bounded coding-task acceptance.
+- Start from the repository root after building `dist/`; policy and runtime paths resolve from cwd. The service does not load `.env` automatically.
+- Verify executor and storage independently: absent `HETEMCP_DSH_DESKTOP` selects fake; absent `HETEMCP_DATABASE_URL` selects memory. Real DSH also requires the credentials path and explicit unmetered opt-in. `scripts/run-file-task.ts` forwards these and optional `HETEMCP_ARTIFACT_ROOT`; custom MCP clients must explicitly pass the same environment. Never print a connection string or credentials to prove configuration.
+- Check MCP `isError` before reading `structuredContent.task`. `get_task_result` returns a record, not a compiler or blocking wait. Reuse the idempotency key for retransmission; use a new key for an intentional new execution. The example script creates a new key each invocation and polls with a deadline.
+- Keep task, attempt and session identities plus artifact hashes in evidence. `succeeded` proves only the declared acceptance; syntax checks do not establish GPU compilation, numerical correctness or speedup. Do not repeat a paid model call solely to reconstruct an existing result.
+- PostgreSQL holds records/references; artifact files and run snapshots need separate backup. The checked-in Compose database uses tmpfs and test-only credentials. Do not use its teardown commands to manage an independently retained database or volume.
 
-Reference: [official headless contract](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/bundle/headless/README.md). Record verified versus pending capabilities in `docs/architecture.md`; simulated harness tests are not evidence of a real model run.
+Reference: [current architecture](../../docs/architecture.md), [DSH reproduction](../../docs/deepseek-smoke.md), and [official headless contract](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/bundle/headless/README.md). MCP server-side waiting/progress, general repository evaluation, automatic compression and enforced token/cost budgets remain pending; simulated harness tests are not evidence of a real model run.
+
+## Repository Records and Archives
+
+Use [repository-layout.md](../../docs/repository-layout.md) when organizing files or preparing a commit.
+
+- Keep reusable rules and sanitized evidence summaries in maintained docs/Skill. Store task-specific prompts, snapshots, raw outputs, experiment scripts and handoffs under ignored `.heteromcp/`; do not turn an external workload's parameters, host paths or historical scores into general engineering rules.
+- Local historical MLA reports and their dedicated handoff are indexed in `.heteromcp/archive/2026-10-28/manifest.json`. Consult them only when continuing that workload, and verify current state before using historical assumptions. They are not part of the published Skill.
+- Archive with original paths and SHA-256; preserve existing user changes. Check references before moving artifacts or runtime directories. Database references and old scripts may depend on their locations. An archive is neither a new authorization nor a backup.
+- Git tracks source, tests, reusable scripts, sanitized config, lockfile and accepted examples. Ignore dependencies, builds, credentials and compiler intermediates. Custom artifact roots need explicit ignore/backup handling; `.gitignore` does not untrack existing files.
+- Check `git status`, the diff and ignored paths before delivery. Run `npm run check` and `npm run build`; report which external PostgreSQL/DSH checks actually ran. Do not carry old test counts or dependency audit claims forward as fresh evidence.
+- Keep README and both architecture languages aligned when contracts change. Retain raw evidence locally and link to it from handoffs without exposing secrets.
 
 ## Context Switch
 
@@ -65,6 +78,15 @@ decisions:
 evidence:
   - source: file, command, test, or trace ID
     fact: What it establishes
+execution:
+  task_id: ID or not applicable
+  attempt_id: ID or not applicable
+  session_id: ID or not applicable
+  storage: memory | PostgreSQL | not applicable
+artifacts:
+  - path: local path or URI
+    sha256: verified hash
+    retention: local runtime | local archive | tracked example
 changes:
   - path: repository-relative path
     intent: behavioral purpose
@@ -99,4 +121,3 @@ Work is complete only when:
 - provider-specific details have not leaked across the adapter boundary;
 - logs and handoffs identify the job, attempt, worker model, and relevant artifacts without exposing secrets;
 - the final report distinguishes verified facts from residual risks.
-

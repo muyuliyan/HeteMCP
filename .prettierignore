@@ -2,8 +2,8 @@ node_modules/
 dist/
 coverage/
 .npm-cache/
+.heteromcp/
+docs/mla-*.md
+skill/MLA_skill.md
 package-lock.json
 compose.yaml
-docs/architecture.md
-docs/architecture.zh-CN.md
-skill/heteromcp-context-governance/SKILL.md

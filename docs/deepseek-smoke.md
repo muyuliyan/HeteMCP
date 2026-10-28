@@ -6,11 +6,18 @@ embedded in the task specification, client, or verifier.
 
 ```powershell
 npm run build
-$env:HETEMCP_DSH_DESKTOP = 'D:/dsh/dddd'
-$env:HETEMCP_CREDENTIALS_PATH = 'C:/Users/14682/.dsh/.credentials.yaml'
+$env:HETEMCP_DSH_DESKTOP = 'D:/path/to/deepseek-desktop'
+$env:HETEMCP_CREDENTIALS_PATH = 'C:/path/to/.credentials.yaml'
 $env:HETEMCP_ALLOW_UNMETERED = '1'
 node node_modules/tsx/dist/cli.mjs scripts/run-file-task.ts config/bubble-task.json
 ```
+
+Replace paths with your installation and credentials file, and run from the repository root.
+The service does not automatically load `.env`. For retained task records, set
+`HETEMCP_DATABASE_URL` in the client environment before invocation; the script explicitly
+forwards it to the MCP service. Without it, storage is in-memory even though the client saves
+a run snapshot. Never print the connection string. The checked-in Compose database uses tmpfs
+and is disposable; manage durable PostgreSQL storage separately.
 
 The credential path is passed to the native credentials plugin; keys are never copied into
 task records or prompts. HeteMCP uses its own `.heteromcp/dsh-home` and an explicit policy
@@ -28,7 +35,7 @@ means only a completed Harness turn and independent file scope validation. Revie
 source before running the separate compiler/behavior verifier:
 
 ```powershell
-$env:HETEMCP_CXX = 'D:/MINGW64/w64devkit/bin/g++.exe'
+$env:HETEMCP_CXX = 'D:/path/to/g++.exe'
 node node_modules/tsx/dist/cli.mjs scripts/verify-bubble.ts .heteromcp/runs/<task-id>.json
 ```
 
@@ -37,6 +44,10 @@ overwrite a nonempty file. It checks the source hash before compilation and conf
 published bytes. The verifier exercises 57 valid and 3 invalid inputs and writes
 `supervisor-verification.json` next to the attempt report. Generated binaries and session data
 stay under ignored `.heteromcp/`. No commit or push is performed.
+
+Back up task records and artifact files together; a database backup cannot restore file URIs
+by itself. For local archives and publication boundaries, see
+[repository-layout.md](repository-layout.md).
 
 ## Verified run
 

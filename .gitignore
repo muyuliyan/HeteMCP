@@ -1,9 +1,33 @@
+# Dependencies, build output and local runtime (including private archives).
 node_modules/
-.heteromcp/
-dist/
-coverage/
-.npm-cache/
+/.heteromcp/
+/dist/
+/coverage/
+/.npm-cache/
+# Legacy locations used by ongoing local experiments; archive when inactive.
+/docs/mla-*.md
+/skill/MLA_skill.md
+
+# Local configuration and credentials. Keep only sanitized examples in Git.
 *.log
 .env
 .env.*
 !.env.example
+*.credentials.yaml
+*.credentials.yml
+
+# Compiler/cache and editor/OS intermediates.
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
+*.exe
+*.o
+*.obj
+*.pdb
+*.tmp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
+/.idea/
+/.vscode/

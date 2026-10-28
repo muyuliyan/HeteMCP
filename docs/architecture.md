@@ -24,18 +24,18 @@ The MVP prioritizes recoverable execution, explicit state, enforceable permissio
 
 ## 3. Component Boundaries
 
-| Component | Owns | Must not own |
-|---|---|---|
-| MCP Gateway | Tool schemas and transport | Routing or task-state decisions |
-| Orchestrator | State machine, timeout, cancellation, acceptance, lease ownership | Provider SDK details |
-| Worker Loop | Recovery and queue draining | Domain policy |
-| Policy Router | Candidate selection by capability, cost, latency, and risk | Permission bypass |
-| Provider Adapter | Model request/response, streaming, usage, error mapping | Task persistence |
-| Worker Runtime | Isolated tools, repository changes, artifact production | Unrestricted host access |
-| Evaluator | Tests, policy checks, deterministic acceptance, optional model review | Treating subjective review as hard evidence |
-| Task Repository | Atomic claim, revision checks, lease persistence | Business-state decisions |
-| Artifact Store | Patches, logs, reports, hashes, retention | Large blobs embedded in task rows |
-| Event/Telemetry | Traceable lifecycle events, metrics, cost | Secrets or unrestricted prompt content |
+| Component        | Owns                                                                  | Must not own                                |
+| ---------------- | --------------------------------------------------------------------- | ------------------------------------------- |
+| MCP Gateway      | Tool schemas and transport                                            | Routing or task-state decisions             |
+| Orchestrator     | State machine, timeout, cancellation, acceptance, lease ownership     | Provider SDK details                        |
+| Worker Loop      | Recovery and queue draining                                           | Domain policy                               |
+| Policy Router    | Candidate selection by capability, cost, latency, and risk            | Permission bypass                           |
+| Provider Adapter | Model request/response, streaming, usage, error mapping               | Task persistence                            |
+| Worker Runtime   | Isolated tools, repository changes, artifact production               | Unrestricted host access                    |
+| Evaluator        | Tests, policy checks, deterministic acceptance, optional model review | Treating subjective review as hard evidence |
+| Task Repository  | Atomic claim, revision checks, lease persistence                      | Business-state decisions                    |
+| Artifact Store   | Patches, logs, reports, hashes, retention                             | Large blobs embedded in task rows           |
+| Event/Telemetry  | Traceable lifecycle events, metrics, cost                             | Secrets or unrestricted prompt content      |
 
 Dependency direction is `transport -> application -> domain`; provider, database, and worker implementations live under infrastructure.
 
@@ -63,124 +63,97 @@ Carries only the current summary, decisions with reasons, traceable evidence, an
 
 ## 5. Implemented Baseline
 
-The repository currently provides:
+The current supported path is supervised single-file generation:
 
-- strict TypeScript and Zod schemas for tasks, context, artifacts, checks, usage, and results;
-- deterministic task state transitions, idempotent creation, timeout, cancellation, and acceptance enforcement;
-- a provider-neutral `ModelProvider` port and deterministic fake provider;
-- MCP stdio tools: `create_task`, `get_task`, `cancel_task`, and `get_task_result`;
-- in-memory and PostgreSQL repositories with optimistic revision checks;
-- atomic queue claims using `FOR UPDATE SKIP LOCKED`;
-- attempt IDs, worker IDs, heartbeat renewal, lease expiry, recovery, and stale-result rejection;
-- a worker loop that recovers expired work and drains queued tasks;
-- idempotent PostgreSQL migrations;
-- shared repository contract tests for in-memory and PostgreSQL behavior;
-- a Docker Compose PostgreSQL harness with separate real-database integration tests;
-- MCP transport, state-machine, timeout, cancellation, recovery, and concurrency tests.
+`Codex/MCP client -> MCP stdio -> Orchestrator -> TaskExecutor -> FileGenerationExecutor -> AgentHarness -> DSH -> scope checks/artifacts -> result -> supervisor acceptance/publication`
 
-Current verification baseline: 20 fast tests, 6 real PostgreSQL integration tests, strict type checking, ESLint, Prettier, production build, and zero known production dependency vulnerabilities.
+Codex is the coordinating client, not an implemented execution adapter. `TaskExecutor` is the application execution port; `ModelProvider` remains a compatibility alias. `AgentHarness` reports process/session outcomes, not authoritative task acceptance. The policy router, general worker runtime, artifact service and evaluator in section 3 are target boundaries; their general implementations are still pending.
 
-## 6. PostgreSQL Development Decision
+Implemented capabilities:
 
-PostgreSQL remains the durable store. Its deployment mechanism is outside the domain boundary.
+- strict TypeScript/Zod task, context, artifact, check, usage and result contracts;
+- idempotent creation, execution deduplication, timeout, cancellation and acceptance state transitions;
+- MCP stdio tools `create_task`, `get_task`, `cancel_task`, `get_task_result`;
+- in-memory/PostgreSQL repositories, revision checks, atomic claims (`FOR UPDATE SKIP LOCKED`), heartbeat renewal, lease recovery and stale-result rejection;
+- a recovery/queue worker loop and transactionally serialized, idempotent migrations;
+- deterministic fake execution by default and opt-in DSH Desktop `0.2.1-rc.2` file generation;
+- shell-free subprocess execution, bounded NDJSON/diagnostics, session/final validation and process-tree cancellation;
+- per-attempt empty workspaces, independent file scope inspection, SHA-256 source/report references;
+- a real MCP client script and a separate C++ compiler/behavior verifier with explicit publication;
+- automated domain, orchestration, process/protocol, file-scope, transport and shared repository contract tests; a separate real PostgreSQL integration suite.
 
-| Concern | Decision and evidence |
-|---|---|
-| Fast feedback | PGlite runs the shared repository contract tests without a container. |
-| Real database | Docker Compose runs PostgreSQL 17 for local development and integration tests; production uses `HETEMCP_DATABASE_URL` and does not depend on Docker. |
-| Migration safety | A transaction-scoped advisory lock serializes metadata creation and all migration versions across concurrent service starts. |
-| Verified behavior | `npm run test:integration:docker` passed 6 tests: independent-pool claims, connection loss, repository restart, heartbeat lease extension, concurrent migration startup, and partial-index query plans. The runner always removes test containers and volumes. |
-| Operations | Use `npm run db:up` / `npm run db:down` for a retained local container; CI should run fast tests on every change and the real PostgreSQL suite before merge. |
+Verification commands are `npm run check` and `npm run build`; use `npm run test:integration:docker` for real PostgreSQL. Test counts and dependency audit results are time-specific evidence, not permanent architectural guarantees. Real DSH evidence is recorded in [deepseek-smoke.md](deepseek-smoke.md); a simulated subprocess test does not establish model connectivity.
 
-Stage 1 is complete. PGlite remains fast feedback, not a substitute for real PostgreSQL evidence.
+## 6. Runtime and Persistence Decisions
 
-## 7. Not Yet Implemented
+### Configuration and Codex supervision
 
-| Capability | Missing work |
-|---|---|
-| Real providers | OpenAI-compatible adapter, DeepSeek/GLM configuration, streaming, usage parsing, normalized errors |
-| Isolated worker | Git worktree/container lifecycle, path and command allowlists, resource limits, cleanup |
-| Artifact store | Durable patches, commits, logs, test reports, content hashes, retention and access control |
-| Evaluator | Safe command execution, real test/lint/typecheck evidence, patch-scope checks, optional model review |
-| Policy router | Capability/cost/latency/risk routing, availability fallback, escalation rules |
-| Context compressor | Token measurement, automatic handoff generation, source references, completeness validation |
-| Retry and budget policy | Error taxonomy, bounded backoff, attempt/deadline limits, enforced token and cost ceilings |
-| Task graph | Parent/child tasks, dependencies, parallel branches, aggregation, coordinator plans |
-| Observability | Lifecycle event store, OpenTelemetry traces, metrics, cost accounting, progress stream and dashboard |
-| Security | Secret provider, authentication, approval gates, redaction, tenant boundaries, retention policy |
+Run the server from the repository root: policy and private runtime paths resolve from cwd. MCP uses `node <absolute-repository-path>/dist/index.js`; stdout is protocol-only. Codex or another MCP client supplies the actual service environment. The service does not automatically load `.env`.
 
-The current fake provider does not call a model or modify code. Without `HETEMCP_DATABASE_URL`, tasks remain process-local in memory.
+`HETEMCP_DSH_DESKTOP` selects real file generation. It also requires `HETEMCP_CREDENTIALS_PATH` and explicit `HETEMCP_ALLOW_UNMETERED=1`. Without the desktop variable, execution is fake. `HETEMCP_DATABASE_URL` independently selects PostgreSQL; otherwise records are process-local. `scripts/run-file-task.ts` explicitly forwards these variables plus optional `HETEMCP_ARTIFACT_ROOT` to its MCP subprocess. Merely setting a parent variable is insufficient if a custom client omits it from its transport environment.
 
-## 8. Delivery Order
+All four tools return the complete record at `structuredContent.task` on success; check `isError` before reading it. `get_task_result` does not perform compilation or wait for completion. The example client polls with a supervisor deadline and requests cancellation on expiry. It generates a new idempotency key per invocation; clients retrying the same submission must reuse their key.
 
-### Codex/CLI specialization (2026-10-26)
+### DSH Desktop compatibility
 
-The immediate target is supervised DeepSeek Harness execution. Retain task persistence,
-leases and MCP; add an `AgentHarness` port for complete agent runs, separate from model
-inference and independent acceptance. `HarnessOutcome.completed` means a completed agent
-turn, not a successful HeteMCP task. The existing fake-provider path remains a simulation.
+The pinned desktop adapter launches `DeepSeek Harness.exe` as Node (`ELECTRON_RUN_AS_NODE=1`) with its bundled `resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js`. Use absolute executable/entrypoint paths, stdin prompts and explicit environment; no npm `.cmd` shim or shell interpolation.
 
-The first implementation checkpoint adds `DeepSeekHeadlessAdapter`: an explicitly configured
-absolute executable, fixed headless permission flags, stdin prompts, explicit environment,
-bounded NDJSON/diagnostics, matching session/final validation and process-tree termination.
-On Windows use an absolute Node executable and pinned CLI entrypoint as prefix arguments;
-npm `.cmd` shims are not shell-free executables. The caller owns executable/version selection
-and credential configuration. Raw tool output and reasoning are discarded in this checkpoint.
-Errors are sanitized and no automatic retry is performed.
+Desktop `0.2.1-rc.2` does not support the modern `--permission-mode` interface. Its explicit legacy mode uses `--profile headless --patch ...` and [the audited overlay](../config/deepseek-desktop-0.2.1.patch.yml): workspace-write, approval never, native credentials by path, `deepseek-official/deepseek-flash`, shell/web/delegation/plugin-management tools disabled. It uses private `.heteromcp/dsh-home`, leaving the personal profile unchanged. Credentials are loaded by the native plugin, never embedded in tasks.
 
-Local runtime probe: `D:\dsh\dddd` contains Desktop `0.2.1-rc.2`. Its bundled CLI is
-`resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js`, launched by
-`DeepSeek Harness.exe` with `ELECTRON_RUN_AS_NODE=1`. Headless help works. However, an
-empty-stdin invocation with the intended flags exits 1 with `unknown option '--permission-mode'`.
-Inspection of the bundled runner also shows a legacy final event containing only `type/text`.
-The explicit desktop compatibility mode now supplies an audited profile overlay instead of
-those unsupported flags. `config/deepseek-desktop-0.2.1.patch.yml` pins workspace-write and
-approval never, enables the existing credential provider by path, and disables shell, web,
-delegation and plugin-management tools. The inspected legacy runner exits zero only for a
-completed turn; this mode requires both that exit code and a valid legacy final event following
-the initial session event. Modern protocol validation remains strict. The installation is unchanged.
+Legacy completion requires the initial session, a valid legacy final and exit zero, based on inspected runner semantics. Modern mode additionally requires the completed final reason and matching session identity. Never select legacy mode automatically because output is malformed. Recheck CLI, protocol and policy before supporting another version; a successful help invocation is insufficient. No automatic model-call retry or broader permission fallback is implemented.
 
-`src/index.ts` now offers an opt-in `deepseek-file-generation` executor via
-`HETEMCP_DSH_DESKTOP`, `HETEMCP_CREDENTIALS_PATH`, and `HETEMCP_ALLOW_UNMETERED=1`.
-The Orchestrator depends on `TaskExecutor`; the old ModelProvider name remains a compatibility
-alias. `AgentHarness` reports execution only. `FileGenerationExecutor` creates a fresh empty
-per-attempt directory, independently verifies one nonempty regular file (maximum 128 KiB), and
-stores source/report artifacts with SHA-256 hashes. This new-file profile does not expose the
-checkout to the worker and does not publish changes. It accepts only `generated-file-scope`;
-task success does not claim compilation or semantic correctness. The supervisor runs those
-checks separately before explicit publication. V1 usage adds `measured=false`, artifact metadata
-adds optional SHA-256 and a `source` kind. Token/cost values remain advisory in this explicitly
-unmetered profile; no production budget enforcement is claimed. MCP records remain process-local
-without PostgreSQL, while the supervisor saves the final record under `.heteromcp/runs`.
+### File generation and acceptance
 
-Real verification on 2026-10-26: MCP stdio -> Orchestrator -> Desktop 0.2.1-rc.2 -> generated
-`bubble.cpp`, task `4be8fde4-a5ac-4333-ab97-a745eec0091d`, session
-`session-4f4df263-5835-4747-91a4-f76e76f48482`. The independent supervisor compiled with
-C++17, `-Wall -Wextra -Werror -pedantic`, passed 57 valid and 3 invalid input cases, and copied
-the worker's exact bytes to `test/bubble.cpp`. SHA-256:
-`c9a3afcf0bbc5e17b1510a5fbcedb74629be41367bc49f5d50b130fcf4d1e3a5`.
-See `docs/deepseek-smoke.md` for reproduction and evidence paths.
+The executor accepts only `workerProfile=deepseek-file-generation`, one plain filename matching `.cpp`, `.txt` or `.md`, no excluded paths and exactly `generated-file-scope` acceptance. Each attempt creates a fresh empty directory rather than exposing the checkout. It independently verifies exactly one nonempty regular file, at most 128 KiB, and stores SHA-256 references to source and report.
 
-General repository worktrees, structured acceptance commands in a versioned task contract,
-retry/budget enforcement and progress streaming remain future work. A worktree alone does
-not enforce filesystem restrictions. Runtime session data lives in a private ignored directory;
-it is not included in MCP responses or committed artifacts.
+`HarnessOutcome.completed` proves a completed turn. Task `succeeded` in this profile proves that turn plus file-scope validation. Neither proves compilation, behavior, numerical correctness or performance. Independent supervisor checks precede explicit publication; preserve worker bytes when coding is assigned exclusively to DSH. `scripts/verify-bubble.ts` verifies the source hash, compiles/tests and only publishes with `--publish`, refusing a nonempty destination.
 
-Checkpoints:
+Token/cost ceilings in V1 are advisory for this profile. `usage.measured=false` with zero counters means unknown, not free. Explicit unmetered opt-in is required; the wall-clock timeout is enforced. Generic acceptance-command execution, enforceable resource ceilings and repository patch validation remain future work.
 
-1. Harness/process protocol contract and simulated subprocess tests.
-2. Per-attempt workspace, hashed artifacts, evaluator and orchestration integration.
-3. MCP bounded wait/progress, CLI and a real bounded coding-task acceptance run.
+### PostgreSQL and artifact retention
 
-The general roadmap below remains deferred where it exceeds this specialization.
+| Concern            | Decision                                                                                                                                                                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fast feedback      | PGlite runs the shared repository contract suite without Docker.                                                                                                                                                                            |
+| Real database      | PostgreSQL 17 integration tests cover independent claims, connection loss/restart, heartbeat, concurrent migrations and index plans.                                                                                                        |
+| Migration safety   | A transaction-scoped advisory lock serializes metadata creation and migration versions.                                                                                                                                                     |
+| Local Compose      | `compose.yaml` uses tmpfs and test-only credentials. `db:up`/`db:down` are disposable development operations, not durable deployment or backup. The integration runner removes its test containers/volumes.                                 |
+| Durable deployment | Supply an independently managed database via `HETEMCP_DATABASE_URL`; manage its storage, secrets and backups separately from disposable tests.                                                                                              |
+| Artifacts          | Database rows retain task state and artifact references. Files remain under `.heteromcp/artifacts/<task>/<attempt>/` by default; the client saves snapshots in `.heteromcp/runs/`. Database persistence alone does not back up those files. |
 
-1. [x] Add Docker Compose PostgreSQL and real-database integration tests.
-2. Build the isolated worker and durable artifact store; produce a real patch and test report with the fake provider.
-3. Add one OpenAI-compatible provider with normalized errors, streaming, usage, and budget enforcement.
-4. Add the deterministic evaluator and bounded retry policy.
-5. Add a second provider and policy router, then task graphs and coordinator-driven decomposition.
-6. Add event streaming, OpenTelemetry/Langfuse-compatible tracing, cost reporting, and an operator dashboard.
-7. Consider Temporal or a separate queue only after measured PostgreSQL queue limits.
+Worker recovery concerns expired leases and stale owners; no exactly-once external execution guarantee is claimed. Do not relocate/delete referenced artifacts or session directories during housekeeping. Back up records and files together and verify URI resolution and hashes after restoration.
+
+## 7. Remaining Work
+
+| Capability            | Remaining scope                                                                                                                            |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| General worker        | Repository worktrees/containers, runtime path/command policy, resource bounds, cleanup and patch collection                                |
+| Acceptance            | Versioned structured commands, general build/test evaluator and patch-scope validation                                                     |
+| Artifact service      | Portable durable storage, access control, retention and backup/restore tooling beyond local hashed files                                   |
+| Provider inference    | OpenAI-compatible inference adapter, streaming, measured usage and normalized errors; DSH agent execution is already integrated separately |
+| Budgets/retries       | Enforced token/cost ceilings, bounded retry/backoff and deadline/attempt policy                                                            |
+| MCP interaction       | Bounded server-side waiting and cursor-based progress; the current client polls                                                            |
+| Routing/task graphs   | Capability/cost/risk selection, fallback, dependencies, aggregation and decomposition                                                      |
+| Context/observability | Automated compression/handoff validation, lifecycle event store, traces, metrics and cost accounting                                       |
+| Service security      | Authentication, tenant isolation, secret management and production retention controls                                                      |
+
+Implement a versioned contract when acceptance or workspace semantics change; preserve stored V1 records. A Git worktree isolates edits but is not a host filesystem sandbox. The current file-generation profile is a supported bounded workflow, not a general production worker.
+
+## 8. Repository and Delivery Rules
+
+See [repository-layout.md](repository-layout.md) for file ownership and retention. Track code, tests, reusable scripts, sanitized configuration, the lockfile, maintained docs/Skill and the accepted `test/bubble.cpp` example. Keep dependencies, builds, credentials, raw sessions, task snapshots, experiment scripts and task-specific handoffs local and ignored.
+
+On 2026-10-28, eight MLA experiment reports and their task-specific Skill were archived under private `.heteromcp/archive/2026-10-28/` with original paths and SHA-256 manifest. These historical external-workload records are not current engineering guidance. Existing artifact/runtime paths were retained to preserve references. Git push is not a backup of local archives or task data.
+
+Maintain English/Chinese architecture parity, README operational instructions and the governance Skill when durable contracts change. Do not copy full run transcripts or host-specific credentials/paths into these documents. Keep evidence summaries separate from current guarantees.
+
+Next delivery priorities:
+
+1. Preserve the working MCP/DSH generation and recovery contracts.
+2. Add versioned acceptance/workspace semantics and a general independent evaluator.
+3. Add bounded waiting/progress and reusable client interaction.
+4. Expand to repository workers, durable artifact management and measured budget/retry policy.
+5. Add providers/routing, task graphs and observability only as requirements justify them; evaluate a separate queue only after measured PostgreSQL limits.
 
 ## 9. Engineering Rules
 

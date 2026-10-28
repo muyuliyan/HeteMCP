@@ -3,7 +3,7 @@ import { defineConfig } from "eslint/config";
 import tseslint from "typescript-eslint";
 
 export default defineConfig(
-  { ignores: ["dist/**", "coverage/**", "node_modules/**", ".npm-cache/**"] },
+  { ignores: ["dist/**", "coverage/**", "node_modules/**", ".npm-cache/**", ".heteromcp/**"] },
   eslint.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
