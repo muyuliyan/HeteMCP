@@ -25,6 +25,7 @@ Claude Code / Codex / MCP client
 - strict TypeScript / Zod 协议、幂等创建、执行去重、超时、取消及验收状态机。
 - 内存 / PostgreSQL 仓储、revision 检查、原子 claim、heartbeat、lease 过期回收和旧结果拒绝。
 - 三个执行模式共享同一任务协议；默认模式始终是 `dispatch`，不会静默降级成 fake 或其他 agent。
+- Manager 可通过 `plan_work` 获取确定性的 `WorkPacketV1`，再用 `execute_work_packet` 按报文派遣；报文包含角色、阶段、任务模板、`planHash`、停止条件和重试上限。
 - `deepseek-file-generation`、`claude-file-generation`、`codex-file-generation` 与通用 `file-generation` 只生成一个 `.cpp`、`.txt` 或 `.md` 普通文件，非空且不超过 128 KiB；保存源码与报告的 SHA-256。
 - `mutual-check` 由 1–8 个指定 reviewer 审查文件产物；2 个及以上 reviewer 时，每轮 reviewer 会看到其他 reviewer 的结论并给出最终裁决。所有最终裁决通过才算通过。
 - `workflow` 先派遣再互检；`workflaw` 是兼容别名。
@@ -66,6 +67,82 @@ Claude Code / Codex / MCP client
 - 独立互检任务使用 `workerProfile: "mutual-check"`、`mode: "mutual-check"` 与 `sourceTaskId`。
 - `agent` 名由 `HETEMCP_AGENTS` 和自动探测决定；`model` 交给对应 CLI（Claude `--model` / Codex `--model`）。
 - 未配置的 agent 会出现在 `list_workers` 中并附带原因；被任务选中时直接报错，不会回退到 fake。
+
+## Work packet 与派遣判定
+
+Managed work 不再要求 manager 自己选模式。推荐流程：
+
+```text
+manager -> plan_work -> work packet -> 写 design -> execute_work_packet -> worker -> get_task_result -> manager 验收
+```
+
+`plan_work` 根据 `taskKind`、`risk`、`ambiguity`、是否需要独立验证、是否已有产物、显式模式、`reviewBy`、可用 agent 等信号，返回确定性的 `WorkPacketV1`。判定顺序：
+
+| 顺序 | 条件                                 | 策略                                                                                | 实际 task mode      |
+| ---- | ------------------------------------ | ----------------------------------------------------------------------------------- | ------------------- |
+| 1    | 已有 `sourceTaskId`，或任务是 review | `review-only`                                                                       | `mutual-check`      |
+| 2    | 显式指定模式                         | 校验后执行；冲突则 `blocked`                                                        | 按模式              |
+| 3    | high risk 或要求独立验证             | 有 reviewer → `cross-check`；否则 manager 可验收 → `supervised`；否则 `blocked`     | workflow / dispatch |
+| 4    | medium risk / 中等歧义 / 代码任务    | manager 可设计+验收 → `supervised`；否则有 reviewer → `cross-check`；否则 `blocked` | dispatch / workflow |
+| 5    | low risk、单产物、无独立验证         | `dispatch`                                                                          | dispatch            |
+| 6    | 没有可用 worker/reviewer             | `blocked`，附原因                                                                   | 无                  |
+
+默认 worker 优先级为 `deepseek > codex > claude`；显式 `preferredWorker` 不可用时直接 `blocked`，不会偷偷换人。
+
+`reviewBy` 决定谁验收：
+
+- `manager`（推荐默认）：manager 写设计并最终验收，worker 只负责执行。
+- `harness`：MCP 运行指定 reviewer 做内部互检；manager 仍做最终验收。
+- `auto`：显式指定 `preferredReviewers` 时走 harness 互检；否则 workflow 默认由 manager 验收。
+
+### 冒泡排序示例
+
+manager 先请求报文，请求示例见 [work-packet-request.json](config/work-packet-request.json)：
+
+```json
+{
+  "instruction": "写一个冒泡排序程序，使用工作流模式",
+  "taskKind": "code",
+  "artifactName": "bubble.cpp",
+  "requestedMode": "workflow",
+  "reviewBy": "manager",
+  "preferredWorker": "deepseek"
+}
+```
+
+`preferredWorker: "deepseek"` 需要先配置 DSH；未配置时 `plan_work` 会返回 `blocked`，不会改用其他 agent。若想先使用本机已配置的 agent，可省略 `preferredWorker`。
+
+返回的报文会包含：
+
+- `strategy: supervised`
+- `worker: deepseek`
+- `verifier: manager`
+- `phases: design -> dispatch -> verify`
+- `taskMode: dispatch`
+- `taskTemplate.acceptance: ["generated-file-scope"]`
+- `planHash`、停止条件和重试上限
+
+然后 manager：
+
+1. 写代码思路设计：输入输出、边界条件、接口和验证步骤。
+2. 调 `execute_work_packet`，传入原样报文、`design` 和新的 `idempotencyKey`。
+3. MCP 把 design 写入 worker context，派给 DeepSeek Harness 生成 `bubble.cpp`。
+4. manager 轮询 `get_task_result`，独立编译并运行冒泡排序测试。
+5. 通过则交付；失败则带失败证据重新 `plan_work`，最多按报文中的上限重试。
+
+如果希望 Codex 做互检，把请求改为：
+
+```json
+{
+  "requestedMode": "workflow",
+  "reviewBy": "harness",
+  "preferredReviewers": ["codex"]
+}
+```
+
+报文会变成 `cross-check`，`taskMode: workflow`，MCP 内部运行 Codex reviewer；manager 仍需最终验收。
+
+`plan_work` 与 `execute_work_packet` 是 managed work 的推荐入口；`create_task` / `create_workflow` / `create_mutual_check` 仍保留给高级和直接调用场景。
 
 ## 开发与运行
 
@@ -116,15 +193,17 @@ DSH 的完整配置、复现与验收步骤见 [DSH 操作说明](docs/deepseek-
 
 ## MCP 工具
 
-| 工具                  | 参数                                                                | 用途                                             |
-| --------------------- | ------------------------------------------------------------------- | ------------------------------------------------ |
-| `create_task`         | `{idempotencyKey, task}`                                            | 按 `task.mode` 创建并安排任务                    |
-| `create_workflow`     | `{idempotencyKey, task, reviewers}`                                 | 便捷创建“派遣 + 互检”任务，自动补 `mutual-check` |
-| `create_mutual_check` | `{idempotencyKey, sourceTaskId, reviewers, objective?, timeoutMs?}` | 对已有任务的产物创建互检任务                     |
-| `list_workers`        | `{}`                                                                | 列出模式与 agent 可用性                          |
-| `get_task`            | `{taskId}`                                                          | 查询状态、attempt、lease 及已有结果              |
-| `cancel_task`         | `{taskId}`                                                          | 请求取消任务                                     |
-| `get_task_result`     | `{taskId}`                                                          | 返回完整记录、checks、reviews 与产物             |
+| 工具                  | 参数                                                                                                                           | 用途                                             |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| `plan_work`           | `{instruction, taskKind?, risk?, ambiguity?, requestedMode?, reviewBy?, preferredWorker?, preferredReviewers?, sourceTaskId?}` | 返回确定性的 work packet                         |
+| `execute_work_packet` | `{packet, design?, idempotencyKey}`                                                                                            | 校验报文并按其中的任务模板创建任务               |
+| `create_task`         | `{idempotencyKey, task}`                                                                                                       | 高级用法：按 `task.mode` 直接创建任务            |
+| `create_workflow`     | `{idempotencyKey, task, reviewers}`                                                                                            | 便捷创建“派遣 + 互检”任务，自动补 `mutual-check` |
+| `create_mutual_check` | `{idempotencyKey, sourceTaskId, reviewers, objective?, timeoutMs?}`                                                            | 对已有任务的产物创建互检任务                     |
+| `list_workers`        | `{}`                                                                                                                           | 列出模式与 agent 可用性                          |
+| `get_task`            | `{taskId}`                                                                                                                     | 查询状态、attempt、lease 及已有结果              |
+| `cancel_task`         | `{taskId}`                                                                                                                     | 请求取消任务                                     |
+| `get_task_result`     | `{taskId}`                                                                                                                     | 返回完整记录、checks、reviews 与产物             |
 
 成功响应在 `structuredContent.task`（`list_workers` 为 `structuredContent.catalog`），调用方先检查 `isError`。任务协议见 [schemas.ts](src/domain/schemas.ts)，工作流示例见 [workflow-task.json](config/workflow-task.json)。相同提交重发复用 idempotency key；有意新执行使用新 key。
 

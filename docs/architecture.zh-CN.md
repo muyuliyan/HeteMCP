@@ -68,6 +68,19 @@ HeteMCP 是一个供应商无关的异构模型编排服务。头部模型负责
 
 只保留当前摘要、带理由的决策、可追踪证据和未解决问题。大型原始输出应存入 Artifact Store，摘要中只保存引用。
 
+### WorkPacketV1
+
+Manager 提交的是任务信号，而不是模式选择。`plan_work` 返回确定性报文，包含：
+
+- `decision`：策略（`dispatch`、`supervised`、`cross-check`、`review-only`、`blocked`）、实际 `taskMode`、命中规则、置信度以及评分/因子；
+- `roles`：planner、worker、reviewers、verifier；
+- `phases`：design、dispatch、verify、replan/unblock 及 required 标记；
+- `taskTemplate`：dispatch/supervised 使用 `dispatch`，cross-check 使用 `workflow`，review-only 使用 `mutual-check` 的 TaskSpecV1；
+- `managerInstructions`、`stopConditions`、`escalation`；
+- `planHash`：对去除该字段后的报文做规范化 SHA-256。
+
+`execute_work_packet` 校验哈希，拒绝被篡改或 blocked 的报文；design 阶段 required 时必须提供 manager design，并把 design 合并进 worker context。判定顺序：已有产物 → review-only；显式模式 → 执行或冲突时 blocked；高风险或要求独立验证 → 有 reviewer 则 cross-check，否则 manager 可验收则 supervised，否则 blocked；中等风险/歧义/代码 → supervised、cross-check 或 blocked；低风险 → dispatch；无 worker/reviewer → blocked。默认 worker 优先级为 `deepseek > codex > claude`；显式 worker 不可用时 blocked，不静默换人。
+
 ## 5. 已实现基线
 
 当前支持受监督的单文件生成与可选互检：
@@ -80,7 +93,8 @@ Claude Code 与 Codex 既是 MCP 客户端也是执行 adapter。`TaskExecutor` 
 
 - strict TypeScript / Zod 的任务、上下文、产物、检查、互检、用量和结果协议；
 - 幂等创建、执行去重、超时、取消及验收状态迁移；
-- `create_task`、`create_workflow`、`create_mutual_check`、`list_workers`、`get_task`、`cancel_task`、`get_task_result` MCP 工具；
+- `plan_work`、`execute_work_packet`、`create_task`、`create_workflow`、`create_mutual_check`、`list_workers`、`get_task`、`cancel_task`、`get_task_result` MCP 工具；
+- 确定性 work planner，可选择 dispatch、supervised、cross-check、review-only 或 blocked，并输出带哈希的角色、阶段、任务模板和停止条件报文；
 - 本地 Streamable HTTP 端点、session 管理、可选 bearer token、回环绑定与健康检查；
 - 内存/PostgreSQL 仓储、revision 检查、原子 claim（`FOR UPDATE SKIP LOCKED`）、heartbeat、lease 回收和旧结果拒绝；
 - 启动恢复与队列消费循环、事务串行化的幂等 migration；
@@ -105,6 +119,7 @@ Claude Code 与 Codex 既是 MCP 客户端也是执行 adapter。`TaskExecutor` 
 
 ### 模式与互检
 
+- Managed client 先调用 `plan_work` 并遵循返回报文；`create_task` 保留为高级直接接口。planner 是确定性代码，不是模型调用。
 - **派遣**为默认模式。路由器解析 `worker` 或由 `workerProfile` 推导 agent；缺失或不匹配直接失败。
 - **互检**要求 `sourceTaskId` 和至少一个 reviewer。reviewer 获得包含源产物副本的全新工作区，不接触原工作区。两个及以上 reviewer 时，第二轮会看到同伴第一轮结论；最终裁决取第二轮。每轮校验候选哈希，篡改候选即判该 reviewer 失败。
 - **工作流**先以移除 `mutual-check` 的验收集合派遣，再对产物互检。派遣失败时跳过互检并记录 skipped 聚合检查；`workflaw` 归一化为 `workflow`。
@@ -154,7 +169,7 @@ Worker 恢复针对 lease 过期及旧 owner，不承诺外部执行恰好一次
 | 模型推理 Provider | OpenAI-compatible 推理 adapter、流式响应、计量和统一错误；Claude、Codex、DSH agent 执行已接入 |
 | 预算/重试         | token/费用强制上限、有限退避、截止时间与 attempt 策略                                         |
 | MCP 交互          | 服务端有限等待与游标进度；当前客户端轮询                                                      |
-| 路由/任务图       | 模式/agent 路由已实现；成本/风险策略、fallback、依赖、汇总与拆解仍待实现                      |
+| 路由/任务图       | Work-packet 模式/agent 路由已实现；实测成本/延迟策略、fallback、依赖、汇总与拆解仍待实现      |
 | 上下文/可观测性   | 自动压缩/交接校验、生命周期事件、trace、指标和费用统计                                        |
 | 服务安全          | 认证、租户隔离、密钥管理与生产保留控制                                                        |
 

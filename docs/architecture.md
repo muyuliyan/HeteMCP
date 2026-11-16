@@ -68,6 +68,19 @@ Carries status, summary, artifact references, named check results, optional stru
 
 Carries only the current summary, decisions with reasons, traceable evidence, and unresolved questions. Large raw output belongs in the artifact store and is referenced rather than copied.
 
+### WorkPacketV1
+
+The manager supplies task signals, not a mode choice. `plan_work` returns a deterministic packet containing:
+
+- `decision`: strategy (`dispatch`, `supervised`, `cross-check`, `review-only`, `blocked`), effective `taskMode`, matched rule, confidence, and score/factors;
+- `roles`: planner, worker, reviewers, verifier;
+- `phases`: design, dispatch, verify, replan/unblock with required flags;
+- `taskTemplate`: a TaskSpecV1 using `dispatch` (dispatch/supervised), `workflow` (cross-check), or `mutual-check` (review-only);
+- `managerInstructions`, `stopConditions`, and `escalation`;
+- `planHash`: canonical SHA-256 over the packet without the hash.
+
+`execute_work_packet` verifies the hash, rejects tampered or blocked packets, requires a manager design when the design phase is required, and merges that design into the worker context. The policy order is: existing artifact → review-only; explicit mode → honor or block on conflict; high risk or independent verification → cross-check when reviewers exist, otherwise supervised manager verification, otherwise blocked; medium risk, medium ambiguity, or code → supervised, cross-check, or blocked; low risk → dispatch; no worker/reviewer → blocked. Default worker priority is `deepseek > codex > claude`; an unavailable explicit worker blocks instead of silently switching.
+
 ## 5. Implemented Baseline
 
 The current supported path is supervised single-file generation with optional peer review:
@@ -80,7 +93,8 @@ Implemented capabilities:
 
 - strict TypeScript/Zod task, context, artifact, check, review, usage and result contracts;
 - idempotent creation, execution deduplication, timeout, cancellation and acceptance state transitions;
-- MCP tools `create_task`, `create_workflow`, `create_mutual_check`, `list_workers`, `get_task`, `cancel_task`, `get_task_result`;
+- MCP tools `plan_work`, `execute_work_packet`, `create_task`, `create_workflow`, `create_mutual_check`, `list_workers`, `get_task`, `cancel_task`, `get_task_result`;
+- a deterministic work planner that selects dispatch, supervised, cross-check, review-only, or blocked strategies and emits hashed packets with roles, phases, task templates, and stop conditions;
 - a local Streamable HTTP endpoint with session management, optional bearer token, loopback binding and health check;
 - in-memory/PostgreSQL repositories, revision checks, atomic claims (`FOR UPDATE SKIP LOCKED`), heartbeat renewal, lease recovery and stale-result rejection;
 - a recovery/queue worker loop and transactionally serialized, idempotent migrations;
@@ -105,6 +119,7 @@ All task tools return the complete record at `structuredContent.task` on success
 
 ### Modes and mutual check
 
+- Managed clients call `plan_work` first and follow the returned packet; `create_task` remains an advanced direct interface. The planner is deterministic code, not a model call.
 - **Dispatch** is the default. The router resolves `worker` or derives an agent from `workerProfile`; missing or mismatched agents fail explicitly.
 - **Mutual-check** requires `sourceTaskId` plus at least one reviewer. Reviewers receive fresh workspaces containing copies of the source artifact, never the original workspace. With two or more reviewers, round 2 exposes each reviewer to peers' round-1 findings; the final verdict is the round-2 verdict. Every round verifies candidate hashes; a modified candidate fails that reviewer.
 - **Workflow** runs dispatch first with `mutual-check` removed from the dispatch acceptance set, then runs mutual-check over the dispatch artifacts. A failed dispatch skips review and records a skipped aggregate check. `workflaw` is an accepted input alias normalized to `workflow`.
@@ -154,7 +169,7 @@ Worker recovery concerns expired leases and stale owners; no exactly-once extern
 | Provider inference    | OpenAI-compatible inference adapter, streaming, measured usage and normalized errors; Claude, Codex and DSH agent execution are integrated |
 | Budgets/retries       | Enforced token/cost ceilings, bounded retry/backoff and deadline/attempt policy                                                            |
 | MCP interaction       | Bounded server-side waiting and cursor-based progress; the current client polls                                                            |
-| Routing/task graphs   | Mode/agent routing is implemented; cost/risk policy selection, fallback, dependencies and decomposition remain pending                     |
+| Routing/task graphs   | Work-packet mode/agent routing is implemented; measured cost/latency policy, fallback, dependencies and decomposition remain pending       |
 | Context/observability | Automated compression/handoff validation, lifecycle event store, traces, metrics and cost accounting                                       |
 | Service security      | Authentication, tenant isolation, secret management and production retention controls                                                      |
 

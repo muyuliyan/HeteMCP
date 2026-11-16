@@ -9,11 +9,14 @@ import {
   taskSpecSchema,
   type CapabilityCatalog,
 } from "../../domain/schemas.js";
+import { workPacketSchema, workRequestSchema } from "../../domain/work-packet.js";
 import type { Orchestrator } from "../../application/orchestrator.js";
+import { buildTaskFromWorkPacket, planWork } from "../../application/work-planner.js";
 
 const taskIdInput = { taskId: z.uuid().describe("HeteMCP task ID") };
 const taskOutput = { task: taskRecordSchema };
 const catalogOutput = { catalog: capabilityCatalogSchema };
+const packetOutput = { packet: workPacketSchema };
 const idempotencyKey = z.string().trim().min(1).max(200);
 const reviewersInput = z
   .array(agentRefSchema)
@@ -60,7 +63,7 @@ export function createMcpServer(
   orchestrator: Orchestrator,
   options: McpServerOptions = {},
 ): McpServer {
-  const server = new McpServer({ name: "heteromcp", version: "0.2.0" });
+  const server = new McpServer({ name: "heteromcp", version: "0.3.0" });
   const onBackgroundError =
     options.onBackgroundError ??
     ((error: unknown) => console.error("Background task execution failed", error));
@@ -172,6 +175,64 @@ export function createMcpServer(
         const task = await orchestrator.createTask({
           idempotencyKey: input.idempotencyKey,
           task: spec,
+        });
+        schedule(orchestrator, task.id, onBackgroundError);
+        return success(task);
+      } catch (error: unknown) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "plan_work",
+    {
+      description:
+        "Return a deterministic work packet: strategy, roles, phases, task template, manager instructions and stop conditions. Call this before starting managed work instead of choosing a mode yourself.",
+      inputSchema: workRequestSchema,
+      outputSchema: packetOutput,
+      annotations: { readOnlyHint: true },
+    },
+    async (input) => {
+      try {
+        const sourceTask = input.sourceTaskId
+          ? await orchestrator.getTask(input.sourceTaskId)
+          : undefined;
+        const packet = planWork(
+          input,
+          orchestrator.capabilities() ?? fallbackCatalog(),
+          sourceTask ? { sourceTask } : {},
+        );
+        const structuredContent = { packet };
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }],
+          structuredContent,
+        };
+      } catch (error: unknown) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "execute_work_packet",
+    {
+      description:
+        "Execute a work packet returned by plan_work. The packet must be passed back unchanged; optional manager design is merged into the worker context.",
+      inputSchema: {
+        packet: workPacketSchema,
+        design: z.string().trim().min(1).max(20_000).optional(),
+        idempotencyKey,
+      },
+      outputSchema: taskOutput,
+    },
+    async (input) => {
+      try {
+        const packet = workPacketSchema.parse(input.packet);
+        const taskSpec = buildTaskFromWorkPacket(packet, input.design);
+        const task = await orchestrator.createTask({
+          idempotencyKey: input.idempotencyKey,
+          task: taskSpec,
         });
         schedule(orchestrator, task.id, onBackgroundError);
         return success(task);

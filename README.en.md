@@ -25,6 +25,7 @@ Claude Code / Codex / MCP client
 - Strict TypeScript/Zod contracts, idempotent creation, execution deduplication, timeout, cancellation, and an acceptance state machine.
 - In-memory and PostgreSQL repositories, revision checks, atomic claims, heartbeats, expired-lease recovery, and stale-result rejection.
 - All three modes share one task contract. The default is always `dispatch`; there is no silent fallback to fake or another agent.
+- The manager can call `plan_work` for a deterministic `WorkPacketV1`, then `execute_work_packet` to dispatch according to it; packets carry roles, phases, a task template, `planHash`, stop conditions, and a retry limit.
 - `deepseek-file-generation`, `claude-file-generation`, `codex-file-generation`, and the generic `file-generation` profile generate exactly one plain `.cpp`, `.txt`, or `.md` file, non-empty and at most 128 KiB, and store SHA-256 hashes of the source and report.
 - `mutual-check` uses 1–8 selected reviewers over file artifacts. With two or more reviewers, each reviewer sees the other reviewers' conclusions and issues a final verdict. All final verdicts must pass.
 - `workflow` dispatches first and then runs mutual-check; `workflaw` is a compatible alias.
@@ -66,6 +67,82 @@ To run mutual-check separately after a dispatch, call the convenience tool direc
 - Standalone mutual-check tasks use `workerProfile: "mutual-check"`, `mode: "mutual-check"`, and `sourceTaskId`.
 - Agent names are determined by `HETEMCP_AGENTS` and auto-discovery; `model` is passed to the corresponding CLI (`--model` for Claude and Codex).
 - Unavailable agents appear in `list_workers` with a reason. Selecting one fails explicitly and never falls back to fake.
+
+## Work packets and dispatch policy
+
+Managed work no longer asks the manager to choose a mode. The recommended flow is:
+
+```text
+manager -> plan_work -> work packet -> write design -> execute_work_packet -> worker -> get_task_result -> manager verification
+```
+
+`plan_work` uses `taskKind`, `risk`, `ambiguity`, independent-verification requirements, an existing artifact, an explicit mode, `reviewBy`, and available agents to return a deterministic `WorkPacketV1`. Decision order:
+
+| Order | Condition                                           | Strategy                                                                                            | Effective task mode |
+| ----- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------- |
+| 1     | Existing `sourceTaskId`, or a review task           | `review-only`                                                                                       | `mutual-check`      |
+| 2     | Explicit mode requested                             | Validate and honor; conflicting requests become `blocked`                                           | Requested mode      |
+| 3     | High risk or independent verification required      | Reviewer available → `cross-check`; else manager can verify → `supervised`; else `blocked`          | workflow / dispatch |
+| 4     | Medium risk, medium ambiguity, or code work         | Manager can design + verify → `supervised`; else reviewer available → `cross-check`; else `blocked` | dispatch / workflow |
+| 5     | Low risk, one artifact, no independent verification | `dispatch`                                                                                          | dispatch            |
+| 6     | No usable worker/reviewer                           | `blocked` with a reason                                                                             | None                |
+
+The default worker priority is `deepseek > codex > claude`. An explicitly preferred worker that is unavailable produces `blocked`; the planner never silently switches agents.
+
+`reviewBy` selects the verifier:
+
+- `manager` (recommended default): the manager writes the design and performs final verification; the worker only executes.
+- `harness`: MCP runs the selected reviewers for internal cross-check; the manager still performs final verification.
+- `auto`: explicit `preferredReviewers` use harness cross-check; otherwise workflow defaults to manager verification.
+
+### Bubble sort example
+
+The manager requests a packet first; see [work-packet-request.json](config/work-packet-request.json):
+
+```json
+{
+  "instruction": "Write a bubble sort program using workflow mode",
+  "taskKind": "code",
+  "artifactName": "bubble.cpp",
+  "requestedMode": "workflow",
+  "reviewBy": "manager",
+  "preferredWorker": "deepseek"
+}
+```
+
+`preferredWorker: "deepseek"` requires a configured DSH; otherwise `plan_work` returns `blocked` instead of switching agents. Omit `preferredWorker` to use the first available local agent.
+
+The returned packet contains:
+
+- `strategy: supervised`
+- `worker: deepseek`
+- `verifier: manager`
+- `phases: design -> dispatch -> verify`
+- `taskMode: dispatch`
+- `taskTemplate.acceptance: ["generated-file-scope"]`
+- `planHash`, stop conditions, and the retry limit
+
+The manager then:
+
+1. Writes a concise design covering inputs, outputs, edge cases, interfaces, and verification.
+2. Calls `execute_work_packet` with the unchanged packet, the `design`, and a new `idempotencyKey`.
+3. MCP merges the design into the worker context and dispatches to DeepSeek Harness to generate `bubble.cpp`.
+4. Polls `get_task_result`, compiles independently, and runs bubble-sort behavior tests.
+5. Delivers on success; on failure, calls `plan_work` again with the failure evidence and respects the packet's retry limit.
+
+To ask Codex to cross-check instead:
+
+```json
+{
+  "requestedMode": "workflow",
+  "reviewBy": "harness",
+  "preferredReviewers": ["codex"]
+}
+```
+
+The packet becomes `cross-check` with `taskMode: workflow`; MCP runs Codex as a reviewer, and the manager still performs final verification.
+
+`plan_work` and `execute_work_packet` are the recommended managed-work entry points. `create_task`, `create_workflow`, and `create_mutual_check` remain available for advanced or direct use.
 
 ## Development and operation
 
@@ -116,15 +193,17 @@ See the [DSH operation guide](docs/deepseek-smoke.md) for full DSH configuration
 
 ## MCP tools
 
-| Tool                  | Arguments                                                           | Purpose                                                       |
-| --------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `create_task`         | `{idempotencyKey, task}`                                            | Create and schedule a task according to `task.mode`           |
-| `create_workflow`     | `{idempotencyKey, task, reviewers}`                                 | Convenience dispatch + mutual-check task; adds `mutual-check` |
-| `create_mutual_check` | `{idempotencyKey, sourceTaskId, reviewers, objective?, timeoutMs?}` | Create a mutual-check task for an existing task's artifacts   |
-| `list_workers`        | `{}`                                                                | List execution modes and agent availability                   |
-| `get_task`            | `{taskId}`                                                          | Read status, attempt, lease, and any existing result          |
-| `cancel_task`         | `{taskId}`                                                          | Request cancellation                                          |
-| `get_task_result`     | `{taskId}`                                                          | Return the full record, checks, reviews, and artifacts        |
+| Tool                  | Arguments                                                                                                                      | Purpose                                                       |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| `plan_work`           | `{instruction, taskKind?, risk?, ambiguity?, requestedMode?, reviewBy?, preferredWorker?, preferredReviewers?, sourceTaskId?}` | Return a deterministic work packet                            |
+| `execute_work_packet` | `{packet, design?, idempotencyKey}`                                                                                            | Validate a packet and create its task                         |
+| `create_task`         | `{idempotencyKey, task}`                                                                                                       | Advanced: create a task directly from `task.mode`             |
+| `create_workflow`     | `{idempotencyKey, task, reviewers}`                                                                                            | Convenience dispatch + mutual-check task; adds `mutual-check` |
+| `create_mutual_check` | `{idempotencyKey, sourceTaskId, reviewers, objective?, timeoutMs?}`                                                            | Create a mutual-check task for an existing task's artifacts   |
+| `list_workers`        | `{}`                                                                                                                           | List execution modes and agent availability                   |
+| `get_task`            | `{taskId}`                                                                                                                     | Read status, attempt, lease, and any existing result          |
+| `cancel_task`         | `{taskId}`                                                                                                                     | Request cancellation                                          |
+| `get_task_result`     | `{taskId}`                                                                                                                     | Return the full record, checks, reviews, and artifacts        |
 
 Successful task responses are under `structuredContent.task` (`list_workers` uses `structuredContent.catalog`); check `isError` first. The task contract lives in [schemas.ts](src/domain/schemas.ts), and a workflow example is in [workflow-task.json](config/workflow-task.json). Reuse the idempotency key when retransmitting the same submission; use a new key for an intentional new execution.
 

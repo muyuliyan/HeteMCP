@@ -8,7 +8,10 @@ export type DomainErrorCode =
   | "SOURCE_TASK_NO_ARTIFACTS"
   | "AGENT_NOT_FOUND"
   | "AGENT_UNAVAILABLE"
-  | "INVALID_MODE";
+  | "INVALID_MODE"
+  | "PACKET_BLOCKED"
+  | "PACKET_INVALID"
+  | "DESIGN_REQUIRED";
 
 export class DomainError extends Error {
   public constructor(

@@ -1,0 +1,10 @@
+{
+  "instruction": "写一个冒泡排序程序，使用工作流模式",
+  "taskKind": "code",
+  "artifactName": "bubble.cpp",
+  "risk": "medium",
+  "ambiguity": "medium",
+  "requestedMode": "workflow",
+  "reviewBy": "manager",
+  "preferredWorker": "deepseek"
+}

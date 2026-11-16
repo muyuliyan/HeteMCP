@@ -1,6 +1,6 @@
 {
   "name": "heteromcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Provider-neutral MCP orchestration for heterogeneous model workers.",
   "type": "module",
   "private": true,

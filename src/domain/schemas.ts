@@ -1,11 +1,17 @@
 import { z } from "zod";
 
-const nonEmptyText = z.string().trim().min(1);
-const pathText = nonEmptyText.refine((path) => !path.includes("\0"), "Path contains a null byte");
-const agentName = nonEmptyText
+export const nonEmptyTextSchema = z.string().trim().min(1);
+export const pathTextSchema = nonEmptyTextSchema.refine(
+  (path) => !path.includes("\0"),
+  "Path contains a null byte",
+);
+export const agentNameSchema = nonEmptyTextSchema
   .max(64)
   .regex(/^[a-z][a-z0-9-]*$/i, "Agent names use letters, digits and hyphens");
-const modelName = nonEmptyText.max(200);
+const nonEmptyText = nonEmptyTextSchema;
+const pathText = pathTextSchema;
+const agentName = agentNameSchema;
+const modelName = nonEmptyTextSchema.max(200);
 
 export const taskStatusSchema = z.enum([
   "queued",
@@ -18,14 +24,27 @@ export const taskStatusSchema = z.enum([
 ]);
 
 export const executionModeValueSchema = z.enum(["dispatch", "mutual-check", "workflow"]);
+export const budgetSchema = z.object({
+  maxInputTokens: z.number().int().positive(),
+  maxOutputTokens: z.number().int().positive(),
+  maxCostMicros: z.number().int().nonnegative(),
+});
 
 // Aliases stay in the input schema because MCP tool schemas cannot contain transforms.
 // The orchestrator normalizes them before persistence.
-export const executionModeSchema = z
-  .enum(["dispatch", "mutual-check", "mutual_check", "cross-check", "workflaw", "workflow"])
-  .default("dispatch");
+export const executionModeInputSchema = z.enum([
+  "dispatch",
+  "mutual-check",
+  "mutual_check",
+  "cross-check",
+  "workflaw",
+  "workflow",
+]);
+export const executionModeSchema = executionModeInputSchema.default("dispatch");
 
-export function normalizeExecutionMode(mode: z.infer<typeof executionModeSchema>): ExecutionMode {
+export function normalizeExecutionMode(
+  mode: z.infer<typeof executionModeInputSchema>,
+): ExecutionMode {
   if (mode === "dispatch") return "dispatch";
   if (mode === "workflow" || mode === "workflaw") return "workflow";
   return "mutual-check";
@@ -55,11 +74,7 @@ export const taskSpecSchema = z
     reviewers: z.array(agentRefSchema).max(8).default([]),
     mode: executionModeSchema,
     sourceTaskId: z.uuid().optional(),
-    budget: z.object({
-      maxInputTokens: z.number().int().positive(),
-      maxOutputTokens: z.number().int().positive(),
-      maxCostMicros: z.number().int().nonnegative(),
-    }),
+    budget: budgetSchema,
     timeoutMs: z.number().int().min(100).max(86_400_000),
     context: contextEnvelopeSchema,
   })
@@ -253,6 +268,7 @@ export const submitTaskInputSchema = z.object({
 });
 
 export type TaskStatus = z.infer<typeof taskStatusSchema>;
+export type Budget = z.infer<typeof budgetSchema>;
 export type ContextEnvelope = z.infer<typeof contextEnvelopeSchema>;
 export type TaskSpec = z.infer<typeof taskSpecSchema>;
 export type Artifact = z.infer<typeof artifactSchema>;
