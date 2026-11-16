@@ -8,9 +8,9 @@ HeteMCP 是一个供应商无关的异构模型编排服务。头部模型负责
 
 目标链路为：
 
-`MCP 客户端 -> 编排器 -> 策略路由 -> 模型/Worker -> 产物 -> 验收器 -> 结果`
+`MCP 客户端 -> MCP Gateway -> 编排器 -> 模式路由 -> Agent Harness -> 产物 -> 可选互检 -> 结果`
 
-MVP 优先保证任务可恢复、状态明确、权限可强制、结果可验证。现阶段不构建自治代理组织、通用工作流 DSL，也不在缺少性能数据时提前引入分布式基础设施。
+三种模式共享同一任务协议：`dispatch`（默认）、`mutual-check` 与 `workflow`（先派遣再互检；`workflaw` 为输入别名）。MVP 优先保证任务可恢复、状态明确、权限可强制、结果可验证。现阶段不构建自治代理组织、通用工作流 DSL，也不在缺少性能数据时提前引入分布式基础设施。
 
 ## 2. 架构不变量
 
@@ -29,10 +29,10 @@ MVP 优先保证任务可恢复、状态明确、权限可强制、结果可验�
 | MCP Gateway      | 工具 Schema 和传输层                     | 路由或任务状态决策         |
 | Orchestrator     | 状态机、超时、取消、验收、租约所有权     | 供应商 SDK 细节            |
 | Worker Loop      | 任务恢复和队列消费                       | 领域策略                   |
-| Policy Router    | 根据能力、成本、延迟和风险选择候选模型   | 绕过权限                   |
+| Mode Router      | 模式选择、agent 解析和 workflow 组合     | 绕过权限或静默降级         |
 | Provider Adapter | 模型调用、流式响应、用量和错误映射       | 保存任务状态               |
 | Worker Runtime   | 隔离工具、仓库修改和产物生成             | 不受限地访问宿主机         |
-| Evaluator        | 测试、规则检查、确定性验收和可选模型审查 | 用主观评价替代硬证据       |
+| Evaluator        | 测试、规则检查、确定性验收和模型互检     | 用主观评价替代编译证据     |
 | Task Repository  | 原子 claim、revision 检查和 lease 持久化 | 业务状态决策               |
 | Artifact Store   | patch、日志、报告、哈希和保留策略        | 把大对象塞入任务行         |
 | Event/Telemetry  | 可追踪事件、指标和成本                   | 保存密钥或无限制的提示内容 |
@@ -51,11 +51,18 @@ MVP 优先保证任务可恢复、状态明确、权限可强制、结果可验�
 
 ### TaskSpecV1
 
-包含单一可验证目标、允许与禁止路径、验收条件、Worker Profile、Token/成本限制、超时和 `ContextEnvelopeV1`。
+包含单一可验证目标、允许与禁止路径、验收条件、Worker Profile、Token/成本限制、超时和 `ContextEnvelopeV1`。V1 以增量字段选择模式与参与者：
+
+- `mode`：`dispatch`（默认）、`mutual-check` 或 `workflow`；输入别名 `mutual_check`、`cross-check`、`workflaw` 在持久化前归一化。
+- `worker`：可选 `{ agent, model? }`；优先于由 profile 推导的 agent。
+- `reviewers`：`{ agent, model? }[]`，最多 8 个；互检与工作流必填。
+- `sourceTaskId`：独立互检必填，派遣与工作流禁止。
+
+工作流先以“移除 `mutual-check` 验收项”的 spec 派遣，再审查产物。互检验收必须包含 `mutual-check`，只允许已实现的验收项，且所有 reviewer 的最终裁决都通过。
 
 ### AttemptResultV1
 
-包含状态、摘要、产物引用、具名检查结果、用量和可选类型化错误。成功结果必须至少包含一个产物，并为每项验收条件提供通过的检查。
+包含状态、摘要、产物引用、具名检查结果、可选结构化 `reviews`、用量和可选类型化错误。成功结果必须至少包含一个产物，并为每项验收条件提供通过的检查。互检会为每个 reviewer 生成检查项，并另加聚合 `mutual-check` 检查；模型裁决是证据，不是编译或运行时证明。
 
 ### ContextEnvelopeV1
 
@@ -63,36 +70,50 @@ MVP 优先保证任务可恢复、状态明确、权限可强制、结果可验�
 
 ## 5. 已实现基线
 
-当前支持的链路是受监督的单文件生成：
+当前支持受监督的单文件生成与可选互检：
 
-`Codex/MCP 客户端 -> MCP stdio -> Orchestrator -> TaskExecutor -> FileGenerationExecutor -> AgentHarness -> DSH -> 范围检查/产物 -> 结果 -> supervisor 验收/发布`
+`Claude Code / Codex / MCP 客户端 -> MCP stdio 或 Streamable HTTP -> Orchestrator -> ModeRouter -> AgentHarness（Claude/Codex/DSH/fake） -> 范围检查/产物 -> 可选互检 -> 结果 -> supervisor 验收/发布`
 
-Codex 是协调客户端，尚无 Codex 执行 adapter。`TaskExecutor` 是应用执行端口，`ModelProvider` 保留为兼容别名；`AgentHarness` 只报告进程/会话结果，不提供权威验收。第 3 节的策略路由、通用 Worker、Artifact Service 和 Evaluator 是目标边界，通用实现仍待完成。
+Claude Code 与 Codex 既是 MCP 客户端也是执行 adapter。`TaskExecutor` 是应用执行端口，`ModelProvider` 保留为兼容别名；`AgentHarness` 只报告进程/会话结果，不提供权威验收。`ModeRoutingExecutor` 组合派遣、互检和工作流，不允许模型自行声明验收通过。第 3 节的通用 Worker、持久 Artifact Service 和广泛 Evaluator 仍是目标边界。
 
 已实现能力：
 
-- strict TypeScript / Zod 的任务、上下文、产物、检查、用量和结果协议；
+- strict TypeScript / Zod 的任务、上下文、产物、检查、互检、用量和结果协议；
 - 幂等创建、执行去重、超时、取消及验收状态迁移；
-- `create_task`、`get_task`、`cancel_task`、`get_task_result` 四个 MCP stdio 工具；
+- `create_task`、`create_workflow`、`create_mutual_check`、`list_workers`、`get_task`、`cancel_task`、`get_task_result` MCP 工具；
+- 本地 Streamable HTTP 端点、session 管理、可选 bearer token、回环绑定与健康检查；
 - 内存/PostgreSQL 仓储、revision 检查、原子 claim（`FOR UPDATE SKIP LOCKED`）、heartbeat、lease 回收和旧结果拒绝；
 - 启动恢复与队列消费循环、事务串行化的幂等 migration；
-- 默认确定性 fake 执行，以及显式启用的 DSH Desktop `0.2.1-rc.2` 文件生成；
-- 无 shell 的子进程调用、有限 NDJSON/诊断、session/final 校验和进程树取消；
+- 自动探测 Claude Code 与 Codex、显式启用的 DSH Desktop `0.2.1-rc.2`、确定性 fake；
+- 三个 harness 的无 shell 子进程调用、有限诊断、类型化完成判断和进程树取消；
 - 独立 attempt 空工作区、独立文件范围检查、带 SHA-256 的源码和报告引用；
+- 互检使用隔离 reviewer 工作区、候选哈希校验、可选交叉复审轮次和确定性汇总；
 - 真实 MCP 客户端脚本、独立 C++ 编译/行为验收和显式发布；
-- 领域、编排、进程协议、文件范围、传输及共享仓储契约测试，以及独立真实 PostgreSQL 集成测试。
+- 领域、编排、进程协议、文件范围、模式路由、HTTP、传输及共享仓储契约测试，以及独立真实 PostgreSQL 集成测试。
 
-验证命令为 `npm run check`、`npm run build`；真实 PostgreSQL 使用 `npm run test:integration:docker`。测试数量和依赖审计结果属于某次运行证据，不是永久架构保证。真实 DSH 证据见 [deepseek-smoke.md](deepseek-smoke.md)；模拟子进程测试不能证明真实模型连通。
+验证命令为 `npm run check`、`npm run build`；真实 PostgreSQL 使用 `npm run test:integration:docker`。测试数量和依赖审计结果属于某次运行证据，不是永久架构保证。真实 DSH 证据见 [deepseek-smoke.md](deepseek-smoke.md)；模拟 harness 测试不能证明 Claude/Codex 的真实模型连通。
 
 ## 6. 运行与持久化决策
 
-### 配置与 Codex 监督
+### 配置与客户端监督
 
-从仓库根目录启动服务，policy 与私有运行目录均按 cwd 解析。MCP 命令为 `node <仓库绝对路径>/dist/index.js`，stdout 仅承载协议。Codex 或其他 MCP 客户端负责传入实际服务环境；服务不会自动加载 `.env`。
+服务按模块位置解析 policy 与私有运行目录，客户端 cwd 不再必须是仓库根。MCP 命令为 `node <仓库绝对路径>/dist/index.js`，stdout 仅承载协议。Claude Code、Codex 或其他 MCP 客户端负责传入实际服务环境；服务不会自动加载 `.env`。
 
-`HETEMCP_DSH_DESKTOP` 启用真实文件生成，同时要求 `HETEMCP_CREDENTIALS_PATH` 和显式 `HETEMCP_ALLOW_UNMETERED=1`；缺少 desktop 变量则使用 fake。`HETEMCP_DATABASE_URL` 独立决定是否使用 PostgreSQL，否则记录仅存在于当前进程。`scripts/run-file-task.ts` 显式转发以上变量及可选的 `HETEMCP_ARTIFACT_ROOT`。自定义 MCP 客户端若遗漏 transport 环境，父进程设置变量也不能保证生效。
+`HETEMCP_AGENTS=auto` 自动探测 Claude Code、Codex 与已配置的 DSH；显式逗号列表可收窄范围。Claude/Codex 必须使用原生可执行文件（Windows 下为 `.exe`），禁止 `.cmd` shim 或 shell 插值。Claude worker 使用 `--strict-mcp-config`，Codex worker 传入 `-c mcp_servers={}`，避免把用户 MCP server 暴露给 worker。`HETEMCP_CLAUDE_MODEL`、`HETEMCP_CODEX_MODEL` 提供默认模型，任务中的 `worker.model` 或 reviewer `model` 可覆盖。DSH 仍需 `HETEMCP_DSH_DESKTOP`、`HETEMCP_CREDENTIALS_PATH` 和显式 `HETEMCP_ALLOW_UNMETERED=1`。`HETEMCP_DATABASE_URL` 独立决定是否使用 PostgreSQL，否则记录仅存在于当前进程。`scripts/run-file-task.ts` 显式转发以上变量及可选的 `HETEMCP_ARTIFACT_ROOT`。自定义 MCP 客户端若遗漏 transport 环境，父进程设置变量也不能保证生效。
 
-四个工具成功时均在 `structuredContent.task` 返回完整记录，读取前先检查 `isError`。`get_task_result` 不执行编译，也不等待完成。示例客户端通过轮询和 supervisor 截止时间等待，超时请求取消；每次启动生成新 idempotency key，重发同一提交的客户端应复用原 key。
+任务工具成功时在 `structuredContent.task` 返回完整记录，`list_workers` 返回 `structuredContent.catalog`，读取前先检查 `isError`。`get_task_result` 不执行编译，也不等待完成。示例客户端通过轮询和 supervisor 截止时间等待，超时请求取消；每次启动生成新 idempotency key，重发同一提交的客户端应复用原 key。
+
+### 模式与互检
+
+- **派遣**为默认模式。路由器解析 `worker` 或由 `workerProfile` 推导 agent；缺失或不匹配直接失败。
+- **互检**要求 `sourceTaskId` 和至少一个 reviewer。reviewer 获得包含源产物副本的全新工作区，不接触原工作区。两个及以上 reviewer 时，第二轮会看到同伴第一轮结论；最终裁决取第二轮。每轮校验候选哈希，篡改候选即判该 reviewer 失败。
+- **工作流**先以移除 `mutual-check` 的验收集合派遣，再对产物互检。派遣失败时跳过互检并记录 skipped 聚合检查；`workflaw` 归一化为 `workflow`。
+- reviewer 只能写出符合版本化 schema 的单个有界 `review.json`；非法输出记为失败而非崩溃。review 产物带哈希保存在 attempt 目录。
+- 互检是模型评审证据，不能替代编译、行为测试、计量用量或 supervisor 发布。
+
+### MCP HTTP 与 CC-switch
+
+`--transport http` 或 `HETEMCP_MCP_TRANSPORT=http` 启动 Streamable HTTP 端点（默认 `127.0.0.1:8787/mcp`），支持 per-session server、JSON 响应、`/healthz`、session 上限和回环 Origin 检查。非回环绑定必须设置 `HETEMCP_MCP_TOKEN`，token 使用常量时间比较。`npm run mcp:cc-switch` 在忽略目录 `.heteromcp/cc-switch/` 生成可直接导入的 `mcpServers` 文件，包含绝对 node、仓库、agent 与产物路径。CC-switch 可直接导入 stdio 入口；HTTP 入口需先运行 `npm run start:http`。
 
 ### DSH Desktop 兼容
 
@@ -104,11 +125,11 @@ Desktop `0.2.1-rc.2` 不支持现代 `--permission-mode` 参数。显式 legacy 
 
 ### 文件生成与验收
 
-executor 只接受 `workerProfile=deepseek-file-generation`、一个 `.cpp`/`.txt`/`.md` 普通文件名、空 excludedPaths 和唯一 `generated-file-scope` 验收项。每个 attempt 创建全新空目录，不暴露 checkout；独立确认只有一个非空普通文件且不超过 128 KiB，保存源码与报告 SHA-256 引用。
+executor 接受通用 `file-generation`（需显式 `worker` 或 `HETEMCP_DEFAULT_WORKER`）以及 `claude-file-generation`、`codex-file-generation`、legacy `deepseek-file-generation`。它要求一个 `.cpp`/`.txt`/`.md` 普通文件名、空 excludedPaths，且验收包含 `generated-file-scope`。每个 attempt 创建全新空目录，不暴露 checkout；独立确认只有一个非空普通文件且不超过 128 KiB，保存源码与报告 SHA-256 引用。executor 还会校验显式 `worker.agent` 与实际 harness 一致。
 
-`HarnessOutcome.completed` 只证明回合完成；该模式的任务 `succeeded` 证明回合完成且文件范围验收通过。两者都不证明编译、行为、数值正确或性能。supervisor 独立验收后显式发布；用户要求由 DSH 编码时保留其原始字节。`scripts/verify-bubble.ts` 验证源码哈希并编译测试，仅在 `--publish` 时发布，拒绝覆盖非空目标。
+`HarnessOutcome.completed` 只证明回合完成；该模式的任务 `succeeded` 证明回合完成、范围验收通过，并在工作流模式下要求所有 reviewer 裁决通过。这些都不证明编译、行为、数值正确或性能。supervisor 独立验收后显式发布；用户要求由某模型编码时保留其原始字节。`scripts/verify-bubble.ts` 验证源码哈希并编译测试，仅在 `--publish` 时发布，拒绝覆盖非空目标。
 
-该模式的 V1 token/费用上限仅为提示；`usage.measured=false` 与零计数表示未知而非免费。必须显式启用未计量模式，墙钟超时仍强制执行。通用验收命令、资源上限与仓库 patch 验收仍待实现。
+V1 token/费用上限仅为提示；`usage.measured=false` 与零计数表示未知而非免费。DSH 必须显式启用未计量模式；所有 harness 都强制执行墙钟超时。通用验收命令、资源上限与仓库 patch 验收仍待实现。
 
 ### PostgreSQL 与产物保留
 
@@ -125,17 +146,17 @@ Worker 恢复针对 lease 过期及旧 owner，不承诺外部执行恰好一次
 
 ## 7. 后续工作
 
-| 能力              | 剩余范围                                                                             |
-| ----------------- | ------------------------------------------------------------------------------------ |
-| 通用 Worker       | 仓库 worktree/container、运行时路径/命令策略、资源边界、清理与 patch 收集            |
-| 验收              | 版本化结构化命令、通用 build/test evaluator 与 patch 范围检查                        |
-| Artifact Service  | 超出本地哈希文件的持久存储、访问控制、保留和备份恢复工具                             |
-| 模型推理 Provider | OpenAI-compatible 推理 adapter、流式响应、计量和统一错误；DSH agent 执行已经单独接入 |
-| 预算/重试         | token/费用强制上限、有限退避、截止时间与 attempt 策略                                |
-| MCP 交互          | 服务端有限等待与游标进度；当前客户端轮询                                             |
-| 路由/任务图       | 能力/成本/风险选择、fallback、依赖、汇总与拆解                                       |
-| 上下文/可观测性   | 自动压缩/交接校验、生命周期事件、trace、指标和费用统计                               |
-| 服务安全          | 认证、租户隔离、密钥管理与生产保留控制                                               |
+| 能力              | 剩余范围                                                                                      |
+| ----------------- | --------------------------------------------------------------------------------------------- |
+| 通用 Worker       | 仓库 worktree/container、运行时路径/命令策略、资源边界、清理与 patch 收集                     |
+| 验收              | 版本化结构化命令、通用 build/test evaluator 与 patch 范围检查                                 |
+| Artifact Service  | 超出本地哈希文件的持久存储、访问控制、保留和备份恢复工具                                      |
+| 模型推理 Provider | OpenAI-compatible 推理 adapter、流式响应、计量和统一错误；Claude、Codex、DSH agent 执行已接入 |
+| 预算/重试         | token/费用强制上限、有限退避、截止时间与 attempt 策略                                         |
+| MCP 交互          | 服务端有限等待与游标进度；当前客户端轮询                                                      |
+| 路由/任务图       | 模式/agent 路由已实现；成本/风险策略、fallback、依赖、汇总与拆解仍待实现                      |
+| 上下文/可观测性   | 自动压缩/交接校验、生命周期事件、trace、指标和费用统计                                        |
+| 服务安全          | 认证、租户隔离、密钥管理与生产保留控制                                                        |
 
 验收或工作区语义变化时引入版本化协议，保留已有 V1 记录。Git worktree 隔离修改，不是宿主文件系统沙箱。当前文件生成模式是已支持的有限工作流，不是通用生产 Worker。
 
@@ -143,14 +164,14 @@ Worker 恢复针对 lease 过期及旧 owner，不承诺外部执行恰好一次
 
 文件归属与保留规则见 [repository-layout.md](repository-layout.md)。Git 跟踪源码、测试、可复用脚本、脱敏配置、lockfile、维护文档/Skill 及已验收的 `test/bubble.cpp`。依赖、构建、凭据、原始会话、任务快照、实验脚本和任务专用交接留在本地忽略目录。
 
-2026-10-28 将 8 份 MLA 实验报告及其任务专用 Skill 归档至私有 `.heteromcp/archive/2026-10-28/`，附原路径与 SHA-256 清单。这些项目外负载的历史记录不作为当前工程规范。已有产物/运行路径保持原位以保全引用。Git push 不备份本地归档和任务数据。
+项目外负载的私有报告与任务专用交接归档在忽略目录 `.heteromcp/archive/`，附清单与哈希。它们不作为当前工程规范；活动实验路径保持原位以保全引用。`npm run check:private` 会拒绝被 Git 跟踪的私有负载路径，`npm run hooks:install` 启用 pre-push 守卫；Git push 不备份本地归档和任务数据。
 
 稳定契约变更时同步中英文架构、README 操作说明和治理 Skill。不向这些文档复制完整运行记录、本机凭据或个人绝对路径；历史证据摘要与当前能力分开说明。
 
 下一步交付优先级：
 
-1. 保持已工作的 MCP/DSH 生成链路与恢复契约。
-2. 引入版本化验收/工作区语义和通用独立 evaluator。
+1. 保持已工作的 MCP 派遣、互检、工作流与恢复契约。
+2. 引入版本化验收/工作区语义和文件范围之外的通用确定性 evaluator。
 3. 增加有限等待、进度与可复用客户端交互。
 4. 扩展仓库 Worker、持久产物管理、可计量预算与有限重试。
 5. 按实际需求增加 Provider/路由、任务图和可观测性；仅在实测 PostgreSQL 瓶颈后评估独立队列。

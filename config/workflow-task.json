@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "objective": "Write a short workflow note explaining dispatch plus mutual-check.",
+  "allowedPaths": ["workflow-note.txt"],
+  "excludedPaths": [],
+  "acceptance": ["generated-file-scope", "mutual-check"],
+  "workerProfile": "file-generation",
+  "worker": { "agent": "claude" },
+  "mode": "workflow",
+  "reviewers": [{ "agent": "codex" }, { "agent": "claude" }],
+  "budget": {
+    "maxInputTokens": 20000,
+    "maxOutputTokens": 4000,
+    "maxCostMicros": 0
+  },
+  "timeoutMs": 900000,
+  "context": {
+    "summary": "Demonstrates one dispatch followed by two independent reviewers.",
+    "decisions": [],
+    "evidence": [],
+    "openQuestions": []
+  }
+}

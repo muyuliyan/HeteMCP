@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { resolve, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { z } from "zod";
 
 import { submitTaskInputSchema, taskRecordSchema } from "../src/domain/schemas.js";
+import { discoverAgentExecutables } from "../src/infrastructure/agents/registry.js";
 
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const inputPath = process.argv[2];
 if (!inputPath) throw new Error("Usage: tsx scripts/run-file-task.ts <task.json>");
 const raw: unknown = JSON.parse(await readFile(resolve(inputPath), "utf8"));
@@ -26,20 +29,29 @@ for (const name of [
   "APPDATA",
   "PATH",
   "HETEMCP_DATABASE_URL",
+  "HETEMCP_AGENTS",
+  "HETEMCP_DEFAULT_WORKER",
   "HETEMCP_DSH_DESKTOP",
   "HETEMCP_CREDENTIALS_PATH",
   "HETEMCP_ALLOW_UNMETERED",
   "HETEMCP_ARTIFACT_ROOT",
+  "HETEMCP_ALLOW_EXTERNAL_ARTIFACTS",
+  "HETEMCP_CLAUDE_EXECUTABLE",
+  "HETEMCP_CLAUDE_MODEL",
+  "HETEMCP_CODEX_EXECUTABLE",
+  "HETEMCP_CODEX_MODEL",
 ]) {
   const value = process.env[name];
   if (value) env[name] = value;
 }
-if (!env.HETEMCP_DSH_DESKTOP)
-  throw new Error("HETEMCP_DSH_DESKTOP is required; refusing a fake run");
+const discovered = discoverAgentExecutables(process.env);
+if (!env.HETEMCP_DSH_DESKTOP && !discovered.claude && !discovered.codex) {
+  throw new Error("No Claude, Codex or DSH agent is configured; refusing a fake run");
+}
 const client = new Client({ name: "heteromcp-supervisor", version: "0.1.0" });
 const transport = new StdioClientTransport({
   command: process.execPath,
-  args: [resolve("dist/index.js")],
+  args: [resolve(repositoryRoot, "dist", "index.js")],
   env,
   stderr: "pipe",
 });
@@ -63,7 +75,7 @@ try {
     });
     task = responseSchema.parse(response.structuredContent).task;
   }
-  const directory = resolve(".heteromcp/runs");
+  const directory = resolve(repositoryRoot, ".heteromcp/runs");
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, `${task.id}.json`), JSON.stringify(task, null, 2), {
     flag: "wx",

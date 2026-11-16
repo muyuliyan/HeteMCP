@@ -3,13 +3,15 @@ import { randomUUID } from "node:crypto";
 import { DomainError } from "../domain/errors.js";
 import {
   attemptResultSchema,
+  normalizeExecutionMode,
   submitTaskInputSchema,
   taskRecordSchema,
+  type CapabilityCatalog,
   type SubmitTaskInput,
   type TaskRecord,
 } from "../domain/schemas.js";
 import { isTerminalStatus, transitionTask } from "../domain/task.js";
-import type { TaskExecutor } from "./ports/task-executor.js";
+import type { TaskExecution, TaskExecutor } from "./ports/task-executor.js";
 import type { TaskClaim, TaskRepository } from "./ports/task-repository.js";
 
 export interface OrchestratorOptions {
@@ -48,7 +50,7 @@ export class Orchestrator {
       id: this.#createId(),
       idempotencyKey: input.idempotencyKey,
       status: "queued",
-      spec: input.task,
+      spec: { ...input.task, mode: normalizeExecutionMode(input.task.mode) },
       revision: 0,
       attemptCount: 0,
       cancellationRequested: false,
@@ -98,6 +100,10 @@ export class Orchestrator {
     return this.repository.requeueExpired(this.#now().toISOString());
   }
 
+  public capabilities(): CapabilityCatalog | undefined {
+    return this.provider.describe?.();
+  }
+
   async #claimAndExecute(taskId: string): Promise<TaskRecord> {
     const claimed = await this.repository.claimById(taskId, this.#createClaim());
     return claimed ? this.#executeClaimed(claimed) : this.getTask(taskId);
@@ -127,12 +133,30 @@ export class Orchestrator {
       const current = await this.getTask(claimed.id);
       if (current.status === "cancelled") return current;
 
-      const rawResult = await this.provider.execute({
+      const execution: TaskExecution = {
         taskId: claimed.id,
         attemptId,
         spec: claimed.spec,
         signal: controller.signal,
-      });
+      };
+      if (claimed.spec.mode === "mutual-check") {
+        if (!claimed.spec.sourceTaskId) {
+          throw new DomainError(
+            "SOURCE_TASK_REQUIRED",
+            `Task ${claimed.id} requires sourceTaskId for mutual-check mode`,
+          );
+        }
+        const source = await this.getTask(claimed.spec.sourceTaskId);
+        if (!source.result || source.result.artifacts.length === 0) {
+          throw new DomainError(
+            "SOURCE_TASK_NO_ARTIFACTS",
+            `Source task ${source.id} has no artifacts to review`,
+          );
+        }
+        execution.sourceTask = source;
+      }
+
+      const rawResult = await this.provider.execute(execution);
       const result = attemptResultSchema.parse(rawResult);
       return await this.#completeTask(claimed.id, attemptId, result);
     } catch (error: unknown) {

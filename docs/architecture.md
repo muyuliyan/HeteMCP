@@ -8,9 +8,9 @@ HeteMCP is a provider-neutral orchestration service for heterogeneous model work
 
 The target path is:
 
-`MCP client -> orchestrator -> policy router -> provider/worker -> artifacts -> evaluator -> result`
+`MCP client -> MCP gateway -> orchestrator -> mode router -> agent harness -> artifacts -> optional mutual check -> result`
 
-The MVP prioritizes recoverable execution, explicit state, enforceable permissions, and verifiable output. It does not attempt autonomous agent organizations, general workflow DSLs, or distributed infrastructure without measured need.
+The MVP prioritizes recoverable execution, explicit state, enforceable permissions, and verifiable output. Three modes share one task contract: `dispatch` (default), `mutual-check`, and `workflow` (dispatch then mutual check; `workflaw` is an input alias). It does not attempt autonomous agent organizations, general workflow DSLs, or distributed infrastructure without measured need.
 
 ## 2. Architectural Invariants
 
@@ -24,18 +24,18 @@ The MVP prioritizes recoverable execution, explicit state, enforceable permissio
 
 ## 3. Component Boundaries
 
-| Component        | Owns                                                                  | Must not own                                |
-| ---------------- | --------------------------------------------------------------------- | ------------------------------------------- |
-| MCP Gateway      | Tool schemas and transport                                            | Routing or task-state decisions             |
-| Orchestrator     | State machine, timeout, cancellation, acceptance, lease ownership     | Provider SDK details                        |
-| Worker Loop      | Recovery and queue draining                                           | Domain policy                               |
-| Policy Router    | Candidate selection by capability, cost, latency, and risk            | Permission bypass                           |
-| Provider Adapter | Model request/response, streaming, usage, error mapping               | Task persistence                            |
-| Worker Runtime   | Isolated tools, repository changes, artifact production               | Unrestricted host access                    |
-| Evaluator        | Tests, policy checks, deterministic acceptance, optional model review | Treating subjective review as hard evidence |
-| Task Repository  | Atomic claim, revision checks, lease persistence                      | Business-state decisions                    |
-| Artifact Store   | Patches, logs, reports, hashes, retention                             | Large blobs embedded in task rows           |
-| Event/Telemetry  | Traceable lifecycle events, metrics, cost                             | Secrets or unrestricted prompt content      |
+| Component        | Owns                                                              | Must not own                                |
+| ---------------- | ----------------------------------------------------------------- | ------------------------------------------- |
+| MCP Gateway      | Tool schemas and transport                                        | Routing or task-state decisions             |
+| Orchestrator     | State machine, timeout, cancellation, acceptance, lease ownership | Provider SDK details                        |
+| Worker Loop      | Recovery and queue draining                                       | Domain policy                               |
+| Mode Router      | Mode selection, agent resolution, workflow composition            | Permission bypass or silent fallback        |
+| Provider Adapter | Model request/response, streaming, usage, error mapping           | Task persistence                            |
+| Worker Runtime   | Isolated tools, repository changes, artifact production           | Unrestricted host access                    |
+| Evaluator        | Tests, policy checks, deterministic acceptance, mutual review     | Treating subjective review as compile proof |
+| Task Repository  | Atomic claim, revision checks, lease persistence                  | Business-state decisions                    |
+| Artifact Store   | Patches, logs, reports, hashes, retention                         | Large blobs embedded in task rows           |
+| Event/Telemetry  | Traceable lifecycle events, metrics, cost                         | Secrets or unrestricted prompt content      |
 
 Dependency direction is `transport -> application -> domain`; provider, database, and worker implementations live under infrastructure.
 
@@ -51,11 +51,18 @@ Additional transitions support `blocked`, `cancelled`, and `running -> queued` a
 
 ### TaskSpecV1
 
-Carries one verifiable objective, allowed and excluded paths, acceptance requirements, worker profile, token/cost limits, timeout, and a `ContextEnvelopeV1`.
+Carries one verifiable objective, allowed and excluded paths, acceptance requirements, worker profile, token/cost limits, timeout, and a `ContextEnvelopeV1`. Additive V1 fields select the execution mode and participants:
+
+- `mode`: `dispatch` (default), `mutual-check`, or `workflow`; `mutual_check`, `cross-check`, and `workflaw` are accepted input aliases but normalized before persistence.
+- `worker`: optional `{ agent, model? }`; its presence takes precedence over profile-derived routing.
+- `reviewers`: `{ agent, model? }[]`, up to eight, required for mutual-check and workflow.
+- `sourceTaskId`: required for standalone mutual-check, rejected for dispatch and workflow.
+
+Workflow dispatches with the same spec minus `mutual-check` acceptance, then reviews the dispatch artifacts. Mutual-check requires `mutual-check` acceptance; only implemented acceptance names are allowed, and every reviewer's final verdict must pass.
 
 ### AttemptResultV1
 
-Carries status, summary, artifact references, named check results, usage, and an optional typed error. A successful result must include an artifact and a passed check for every acceptance requirement.
+Carries status, summary, artifact references, named check results, optional structured `reviews`, usage, and an optional typed error. A successful result must include an artifact and a passed check for every acceptance requirement. Mutual-check runs emit one check per reviewer plus an aggregate `mutual-check` check; model verdicts are evidence, not compilation or runtime proof.
 
 ### ContextEnvelopeV1
 
@@ -63,36 +70,50 @@ Carries only the current summary, decisions with reasons, traceable evidence, an
 
 ## 5. Implemented Baseline
 
-The current supported path is supervised single-file generation:
+The current supported path is supervised single-file generation with optional peer review:
 
-`Codex/MCP client -> MCP stdio -> Orchestrator -> TaskExecutor -> FileGenerationExecutor -> AgentHarness -> DSH -> scope checks/artifacts -> result -> supervisor acceptance/publication`
+`Claude Code / Codex / MCP client -> MCP stdio or Streamable HTTP -> Orchestrator -> ModeRouter -> AgentHarness (Claude/Codex/DSH/fake) -> scope checks/artifacts -> optional mutual check -> result -> supervisor acceptance/publication`
 
-Codex is the coordinating client, not an implemented execution adapter. `TaskExecutor` is the application execution port; `ModelProvider` remains a compatibility alias. `AgentHarness` reports process/session outcomes, not authoritative task acceptance. The policy router, general worker runtime, artifact service and evaluator in section 3 are target boundaries; their general implementations are still pending.
+Claude Code and Codex are both execution adapters and MCP clients. `TaskExecutor` is the application execution port; `ModelProvider` remains a compatibility alias. `AgentHarness` reports process/session outcomes, not authoritative task acceptance. `ModeRoutingExecutor` composes dispatch, mutual-check and workflow without letting a model claim acceptance. The general worker runtime, durable artifact service and broad evaluator in section 3 remain target boundaries.
 
 Implemented capabilities:
 
-- strict TypeScript/Zod task, context, artifact, check, usage and result contracts;
+- strict TypeScript/Zod task, context, artifact, check, review, usage and result contracts;
 - idempotent creation, execution deduplication, timeout, cancellation and acceptance state transitions;
-- MCP stdio tools `create_task`, `get_task`, `cancel_task`, `get_task_result`;
+- MCP tools `create_task`, `create_workflow`, `create_mutual_check`, `list_workers`, `get_task`, `cancel_task`, `get_task_result`;
+- a local Streamable HTTP endpoint with session management, optional bearer token, loopback binding and health check;
 - in-memory/PostgreSQL repositories, revision checks, atomic claims (`FOR UPDATE SKIP LOCKED`), heartbeat renewal, lease recovery and stale-result rejection;
 - a recovery/queue worker loop and transactionally serialized, idempotent migrations;
-- deterministic fake execution by default and opt-in DSH Desktop `0.2.1-rc.2` file generation;
-- shell-free subprocess execution, bounded NDJSON/diagnostics, session/final validation and process-tree cancellation;
+- auto-detected Claude Code and Codex harnesses, opt-in DSH Desktop `0.2.1-rc.2`, and deterministic fake execution;
+- shell-free subprocess execution, bounded diagnostics, typed completion and process-tree cancellation for all three harnesses;
 - per-attempt empty workspaces, independent file scope inspection, SHA-256 source/report references;
+- mutual-check with isolated reviewer workspaces, candidate hash checks, optional cross-review round and deterministic aggregation;
 - a real MCP client script and a separate C++ compiler/behavior verifier with explicit publication;
-- automated domain, orchestration, process/protocol, file-scope, transport and shared repository contract tests; a separate real PostgreSQL integration suite.
+- automated domain, orchestration, process/protocol, file-scope, mode-routing, HTTP, transport and shared repository contract tests; a separate real PostgreSQL integration suite.
 
-Verification commands are `npm run check` and `npm run build`; use `npm run test:integration:docker` for real PostgreSQL. Test counts and dependency audit results are time-specific evidence, not permanent architectural guarantees. Real DSH evidence is recorded in [deepseek-smoke.md](deepseek-smoke.md); a simulated subprocess test does not establish model connectivity.
+Verification commands are `npm run check` and `npm run build`; use `npm run test:integration:docker` for real PostgreSQL. Test counts and dependency audit results are time-specific evidence, not permanent architectural guarantees. Real DSH evidence is recorded in [deepseek-smoke.md](deepseek-smoke.md); simulated harness tests do not establish real model connectivity for Claude or Codex.
 
 ## 6. Runtime and Persistence Decisions
 
-### Configuration and Codex supervision
+### Configuration and client supervision
 
-Run the server from the repository root: policy and private runtime paths resolve from cwd. MCP uses `node <absolute-repository-path>/dist/index.js`; stdout is protocol-only. Codex or another MCP client supplies the actual service environment. The service does not automatically load `.env`.
+The server resolves policy and private runtime paths from its module location, so clients do not need a repository-root cwd. MCP uses `node <absolute-repository-path>/dist/index.js`; stdout is protocol-only. Claude Code, Codex or another MCP client supplies the actual service environment. The service does not automatically load `.env`.
 
-`HETEMCP_DSH_DESKTOP` selects real file generation. It also requires `HETEMCP_CREDENTIALS_PATH` and explicit `HETEMCP_ALLOW_UNMETERED=1`. Without the desktop variable, execution is fake. `HETEMCP_DATABASE_URL` independently selects PostgreSQL; otherwise records are process-local. `scripts/run-file-task.ts` explicitly forwards these variables plus optional `HETEMCP_ARTIFACT_ROOT` to its MCP subprocess. Merely setting a parent variable is insufficient if a custom client omits it from its transport environment.
+`HETEMCP_AGENTS=auto` detects Claude Code, Codex and a configured DSH install; an explicit comma list narrows the set. Claude and Codex require native executables (`.exe` on Windows), never `.cmd` shims or shell interpolation. Claude workers run with `--strict-mcp-config` and Codex workers pass `-c mcp_servers={}` so user MCP servers are not exposed to a worker. `HETEMCP_CLAUDE_MODEL` and `HETEMCP_CODEX_MODEL` provide defaults; a task `worker.model` or reviewer `model` overrides them. DSH requires `HETEMCP_DSH_DESKTOP`, `HETEMCP_CREDENTIALS_PATH` and explicit `HETEMCP_ALLOW_UNMETERED=1`. `HETEMCP_DATABASE_URL` independently selects PostgreSQL; otherwise records are process-local. `scripts/run-file-task.ts` explicitly forwards these variables plus optional `HETEMCP_ARTIFACT_ROOT` to its MCP subprocess. Merely setting a parent variable is insufficient if a custom client omits it from its transport environment.
 
-All four tools return the complete record at `structuredContent.task` on success; check `isError` before reading it. `get_task_result` does not perform compilation or wait for completion. The example client polls with a supervisor deadline and requests cancellation on expiry. It generates a new idempotency key per invocation; clients retrying the same submission must reuse their key.
+All task tools return the complete record at `structuredContent.task` on success; `list_workers` returns `structuredContent.catalog`. Check `isError` before reading either. `get_task_result` does not perform compilation or wait for completion. The example client polls with a supervisor deadline and requests cancellation on expiry. It generates a new idempotency key per invocation; clients retrying the same submission must reuse their key.
+
+### Modes and mutual check
+
+- **Dispatch** is the default. The router resolves `worker` or derives an agent from `workerProfile`; missing or mismatched agents fail explicitly.
+- **Mutual-check** requires `sourceTaskId` plus at least one reviewer. Reviewers receive fresh workspaces containing copies of the source artifact, never the original workspace. With two or more reviewers, round 2 exposes each reviewer to peers' round-1 findings; the final verdict is the round-2 verdict. Every round verifies candidate hashes; a modified candidate fails that reviewer.
+- **Workflow** runs dispatch first with `mutual-check` removed from the dispatch acceptance set, then runs mutual-check over the dispatch artifacts. A failed dispatch skips review and records a skipped aggregate check. `workflaw` is an accepted input alias normalized to `workflow`.
+- Reviewer output must be a single bounded `review.json` matching the versioned schema. Invalid output is a failed review, not a crash. Review artifacts are hashed and stored under the attempt directory.
+- Mutual check is advisory evidence from models. It never replaces compilation, behavior tests, measured usage or supervisor publication.
+
+### MCP HTTP and CC-switch
+
+`--transport http` or `HETEMCP_MCP_TRANSPORT=http` starts a Streamable HTTP endpoint (default `127.0.0.1:8787/mcp`) with per-session servers, JSON responses, `/healthz`, a session cap and loopback origin checks. A non-loopback bind requires `HETEMCP_MCP_TOKEN`; tokens are compared in constant time. `npm run mcp:cc-switch` writes ready-to-import `mcpServers` files under ignored `.heteromcp/cc-switch/` with absolute node, repository, agent and artifact paths. CC-switch can import the stdio entry directly; the HTTP entry requires `npm run start:http`.
 
 ### DSH Desktop compatibility
 
@@ -104,11 +125,11 @@ Legacy completion requires the initial session, a valid legacy final and exit ze
 
 ### File generation and acceptance
 
-The executor accepts only `workerProfile=deepseek-file-generation`, one plain filename matching `.cpp`, `.txt` or `.md`, no excluded paths and exactly `generated-file-scope` acceptance. Each attempt creates a fresh empty directory rather than exposing the checkout. It independently verifies exactly one nonempty regular file, at most 128 KiB, and stores SHA-256 references to source and report.
+The file-generation executor accepts the generic `file-generation` profile (with an explicit worker or `HETEMCP_DEFAULT_WORKER`) or the agent-specific `claude-file-generation`, `codex-file-generation` and legacy `deepseek-file-generation` profiles. It requires one plain filename matching `.cpp`, `.txt` or `.md`, no excluded paths and `generated-file-scope` in acceptance. Each attempt creates a fresh empty directory rather than exposing the checkout. It independently verifies exactly one nonempty regular file, at most 128 KiB, and stores SHA-256 references to source and report. The executor checks that an explicit `worker.agent` matches the selected harness.
 
-`HarnessOutcome.completed` proves a completed turn. Task `succeeded` in this profile proves that turn plus file-scope validation. Neither proves compilation, behavior, numerical correctness or performance. Independent supervisor checks precede explicit publication; preserve worker bytes when coding is assigned exclusively to DSH. `scripts/verify-bubble.ts` verifies the source hash, compiles/tests and only publishes with `--publish`, refusing a nonempty destination.
+`HarnessOutcome.completed` proves a completed turn. Task `succeeded` in this profile proves that turn plus scope validation and, in workflow mode, all reviewer verdicts. None of these prove compilation, behavior, numerical correctness or performance. Independent supervisor checks precede explicit publication; preserve worker bytes when coding is assigned exclusively to a model. `scripts/verify-bubble.ts` verifies the source hash, compiles/tests and only publishes with `--publish`, refusing a nonempty destination.
 
-Token/cost ceilings in V1 are advisory for this profile. `usage.measured=false` with zero counters means unknown, not free. Explicit unmetered opt-in is required; the wall-clock timeout is enforced. Generic acceptance-command execution, enforceable resource ceilings and repository patch validation remain future work.
+Token/cost ceilings in V1 are advisory for this profile. `usage.measured=false` with zero counters means unknown, not free. Explicit unmetered opt-in is required for DSH; the wall-clock timeout is enforced for every harness. Generic acceptance-command execution, enforceable resource ceilings and repository patch validation remain future work.
 
 ### PostgreSQL and artifact retention
 
@@ -130,10 +151,10 @@ Worker recovery concerns expired leases and stale owners; no exactly-once extern
 | General worker        | Repository worktrees/containers, runtime path/command policy, resource bounds, cleanup and patch collection                                |
 | Acceptance            | Versioned structured commands, general build/test evaluator and patch-scope validation                                                     |
 | Artifact service      | Portable durable storage, access control, retention and backup/restore tooling beyond local hashed files                                   |
-| Provider inference    | OpenAI-compatible inference adapter, streaming, measured usage and normalized errors; DSH agent execution is already integrated separately |
+| Provider inference    | OpenAI-compatible inference adapter, streaming, measured usage and normalized errors; Claude, Codex and DSH agent execution are integrated |
 | Budgets/retries       | Enforced token/cost ceilings, bounded retry/backoff and deadline/attempt policy                                                            |
 | MCP interaction       | Bounded server-side waiting and cursor-based progress; the current client polls                                                            |
-| Routing/task graphs   | Capability/cost/risk selection, fallback, dependencies, aggregation and decomposition                                                      |
+| Routing/task graphs   | Mode/agent routing is implemented; cost/risk policy selection, fallback, dependencies and decomposition remain pending                     |
 | Context/observability | Automated compression/handoff validation, lifecycle event store, traces, metrics and cost accounting                                       |
 | Service security      | Authentication, tenant isolation, secret management and production retention controls                                                      |
 
@@ -143,14 +164,14 @@ Implement a versioned contract when acceptance or workspace semantics change; pr
 
 See [repository-layout.md](repository-layout.md) for file ownership and retention. Track code, tests, reusable scripts, sanitized configuration, the lockfile, maintained docs/Skill and the accepted `test/bubble.cpp` example. Keep dependencies, builds, credentials, raw sessions, task snapshots, experiment scripts and task-specific handoffs local and ignored.
 
-On 2026-10-28, eight MLA experiment reports and their task-specific Skill were archived under private `.heteromcp/archive/2026-10-28/` with original paths and SHA-256 manifest. These historical external-workload records are not current engineering guidance. Existing artifact/runtime paths were retained to preserve references. Git push is not a backup of local archives or task data.
+Private external-workload reports and task-specific handoffs are archived under ignored `.heteromcp/archive/` with manifests and hashes. They are not current engineering guidance, and live experiment paths are retained to preserve references. `npm run check:private` rejects tracked private-workload paths, and `npm run hooks:install` enables a pre-push guard; Git push is not a backup of local archives or task data.
 
 Maintain English/Chinese architecture parity, README operational instructions and the governance Skill when durable contracts change. Do not copy full run transcripts or host-specific credentials/paths into these documents. Keep evidence summaries separate from current guarantees.
 
 Next delivery priorities:
 
-1. Preserve the working MCP/DSH generation and recovery contracts.
-2. Add versioned acceptance/workspace semantics and a general independent evaluator.
+1. Preserve the working MCP dispatch, mutual-check, workflow and recovery contracts.
+2. Add versioned acceptance/workspace semantics and a general deterministic evaluator beyond file scope.
 3. Add bounded waiting/progress and reusable client interaction.
 4. Expand to repository workers, durable artifact management and measured budget/retry policy.
 5. Add providers/routing, task graphs and observability only as requirements justify them; evaluate a separate queue only after measured PostgreSQL limits.

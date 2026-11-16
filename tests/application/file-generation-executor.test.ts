@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { FileGenerationExecutor } from "../../src/application/file-generation-executor.js";
 import type { AgentHarness } from "../../src/application/ports/agent-harness.js";
-import { createTaskInput } from "../fixtures.js";
+import { createTaskSpec } from "../fixtures.js";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -26,7 +26,7 @@ describe("isolated file generation", () => {
       },
     };
     const executor = new FileGenerationExecutor(harness, directory);
-    const spec = createTaskInput().task;
+    const spec = createTaskSpec();
     spec.workerProfile = executor.name;
     spec.allowedPaths = ["note.txt"];
     spec.excludedPaths = [];
@@ -55,7 +55,7 @@ describe("isolated file generation", () => {
       },
     };
     const executor = new FileGenerationExecutor(harness, tmpdir());
-    const spec = createTaskInput().task;
+    const spec = createTaskSpec();
     spec.allowedPaths = ["../outside.cpp"];
     await expect(
       executor.execute({

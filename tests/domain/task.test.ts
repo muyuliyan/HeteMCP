@@ -3,14 +3,14 @@ import { describe, expect, it } from "vitest";
 import { DomainError } from "../../src/domain/errors.js";
 import { type TaskRecord } from "../../src/domain/schemas.js";
 import { transitionTask } from "../../src/domain/task.js";
-import { createTaskInput } from "../fixtures.js";
+import { createTaskSpec } from "../fixtures.js";
 
 function queuedTask(): TaskRecord {
   return {
     id: "00000000-0000-4000-8000-000000000001",
     idempotencyKey: "transition-test",
     status: "queued",
-    spec: createTaskInput().task,
+    spec: createTaskSpec(),
     revision: 0,
     attemptCount: 0,
     cancellationRequested: false,

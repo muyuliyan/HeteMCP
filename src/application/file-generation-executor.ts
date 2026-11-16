@@ -8,26 +8,49 @@ import type { TaskExecution, TaskExecutor } from "./ports/task-executor.js";
 import type { AttemptResult } from "../domain/schemas.js";
 
 export const fileGenerationAcceptance = "generated-file-scope";
+export const genericFileGenerationProfile = "file-generation";
+
+export interface FileGenerationExecutorOptions {
+  // The executor's advertised profile; defaults to the original DSH profile.
+  profile?: string;
+  // Profiles this executor accepts, including its advertised profile.
+  acceptedProfiles?: readonly string[];
+  // When set, an explicit task worker must name this agent.
+  agent?: string;
+  defaultModel?: string;
+}
 
 // Narrow opt-in file-generation profile: creates a new file, never mutates a checkout.
 // Build/behavior review and publication remain with the supervising client.
 export class FileGenerationExecutor implements TaskExecutor {
-  public readonly name = "deepseek-file-generation";
+  public readonly name: string;
+  readonly #acceptedProfiles: ReadonlySet<string>;
+  readonly #agent: string | undefined;
+  readonly #defaultModel: string | undefined;
+
   public constructor(
     private readonly harness: AgentHarness,
     private readonly artifactRoot: string,
-  ) {}
+    options: FileGenerationExecutorOptions = {},
+  ) {
+    this.name = options.profile ?? "deepseek-file-generation";
+    this.#acceptedProfiles = new Set(options.acceptedProfiles ?? [this.name]);
+    this.#agent = options.agent;
+    this.#defaultModel = options.defaultModel;
+  }
 
   public async execute(input: TaskExecution): Promise<AttemptResult> {
     const filename = input.spec.allowedPaths[0];
     if (
-      input.spec.workerProfile !== this.name ||
+      !this.#acceptedProfiles.has(input.spec.workerProfile) ||
+      (this.#agent !== undefined &&
+        input.spec.worker !== undefined &&
+        input.spec.worker.agent.toLowerCase() !== this.#agent) ||
       input.spec.allowedPaths.length !== 1 ||
       !filename ||
       !/^[a-zA-Z0-9_-]+\.(cpp|txt|md)$/.test(filename) ||
       input.spec.excludedPaths.length > 0 ||
-      input.spec.acceptance.length !== 1 ||
-      input.spec.acceptance[0] !== fileGenerationAcceptance
+      !input.spec.acceptance.includes(fileGenerationAcceptance)
     ) {
       throw new Error(
         "File generation requires one plain filename and generated-file-scope acceptance",
@@ -40,10 +63,12 @@ export class FileGenerationExecutor implements TaskExecutor {
     await mkdir(attemptDirectory, { recursive: true });
     const workspace = join(attemptDirectory, "workspace");
     await mkdir(workspace); // A reused attempt must not silently reuse edited files.
+    const model = input.spec.worker?.model ?? this.#defaultModel;
     const outcome = await this.harness.execute({
       taskId: input.taskId,
       attemptId: input.attemptId,
       workspacePath: workspace,
+      ...(model === undefined ? {} : { model }),
       prompt: [
         "Implement the following task now. Write the actual file using filesystem tools.",
         `Create only ${filename} in the current workspace. Do not create other files.`,
@@ -83,6 +108,9 @@ export class FileGenerationExecutor implements TaskExecutor {
         {
           taskId: input.taskId,
           attemptId: input.attemptId,
+          mode: input.spec.mode,
+          workerProfile: input.spec.workerProfile,
+          worker: input.spec.worker,
           harness: this.harness.kind,
           outcome,
           checks,

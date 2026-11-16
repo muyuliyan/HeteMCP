@@ -4,9 +4,14 @@ node_modules/
 /dist/
 /coverage/
 /.npm-cache/
-# Legacy locations used by ongoing local experiments; archive when inactive.
+# Private model-workload traces; never publish. .heteromcp/ is the only runtime home.
 /docs/mla-*.md
+/docs/nsa-*.md
+/docs/*-mla-*.md
+/docs/*-nsa-*.md
 /skill/MLA_skill.md
+/skill/NSA_skill.md
+/private-work/
 
 # Local configuration and credentials. Keep only sanitized examples in Git.
 *.log

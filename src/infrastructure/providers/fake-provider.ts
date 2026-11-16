@@ -1,8 +1,23 @@
 import type { ModelProvider, ProviderExecution } from "../../application/ports/model-provider.js";
-import type { AttemptResult } from "../../domain/schemas.js";
+import type { AttemptResult, CapabilityCatalog } from "../../domain/schemas.js";
 
 export class FakeProvider implements ModelProvider {
   public readonly name = "fake";
+
+  public describe(): CapabilityCatalog {
+    return {
+      defaultMode: "dispatch",
+      modes: ["dispatch", "mutual-check", "workflow"],
+      agents: [
+        {
+          name: "fake",
+          kind: "deterministic",
+          profiles: ["fake"],
+          available: true,
+        },
+      ],
+    };
+  }
 
   public execute({ taskId, attemptId, spec, signal }: ProviderExecution): Promise<AttemptResult> {
     signal.throwIfAborted();

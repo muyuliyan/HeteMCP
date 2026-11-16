@@ -12,8 +12,9 @@ $env:HETEMCP_ALLOW_UNMETERED = '1'
 node node_modules/tsx/dist/cli.mjs scripts/run-file-task.ts config/bubble-task.json
 ```
 
-Replace paths with your installation and credentials file, and run from the repository root.
-The service does not automatically load `.env`. For retained task records, set
+Replace paths with your installation and credentials file. Running from the repository root is
+still supported, but service paths now resolve from the module location. The service does not
+automatically load `.env`. For retained task records, set
 `HETEMCP_DATABASE_URL` in the client environment before invocation; the script explicitly
 forwards it to the MCP service. Without it, storage is in-memory even though the client saves
 a run snapshot. Never print the connection string. The checked-in Compose database uses tmpfs

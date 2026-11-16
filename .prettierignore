@@ -3,7 +3,12 @@ dist/
 coverage/
 .npm-cache/
 .heteromcp/
+private-work/
 docs/mla-*.md
+docs/nsa-*.md
+docs/*-mla-*.md
+docs/*-nsa-*.md
 skill/MLA_skill.md
+skill/NSA_skill.md
 package-lock.json
 compose.yaml

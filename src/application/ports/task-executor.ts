@@ -1,10 +1,17 @@
-import type { AttemptResult, TaskSpec } from "../../domain/schemas.js";
+import type {
+  AttemptResult,
+  CapabilityCatalog,
+  TaskRecord,
+  TaskSpec,
+} from "../../domain/schemas.js";
 
 export interface TaskExecution {
   taskId: string;
   attemptId: string;
   spec: TaskSpec;
   signal: AbortSignal;
+  // Resolved by the orchestrator only for standalone mutual-check tasks.
+  sourceTask?: TaskRecord;
 }
 
 // An execution service owns artifact collection and independent acceptance.
@@ -12,4 +19,5 @@ export interface TaskExecution {
 export interface TaskExecutor {
   readonly name: string;
   execute(execution: TaskExecution): Promise<AttemptResult>;
+  describe?(): CapabilityCatalog;
 }

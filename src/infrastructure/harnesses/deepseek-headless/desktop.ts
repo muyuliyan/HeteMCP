@@ -7,7 +7,9 @@ export function createDesktopHarness(options: {
   runtimeHome: string;
   credentialsPath: string;
   policyPatch: string;
+  environment?: NodeJS.ProcessEnv;
 }): DeepSeekHeadlessAdapter {
+  const source = options.environment ?? process.env;
   const env: Record<string, string> = {};
   for (const name of [
     "SystemRoot",
@@ -19,7 +21,7 @@ export function createDesktopHarness(options: {
     "APPDATA",
     "PATH",
   ]) {
-    const value = process.env[name];
+    const value = source[name];
     if (value) env[name] = value;
   }
   return new DeepSeekHeadlessAdapter({

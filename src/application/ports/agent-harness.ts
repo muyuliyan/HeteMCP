@@ -3,6 +3,7 @@ export interface HarnessExecution {
   attemptId: string;
   workspacePath: string;
   prompt: string;
+  model?: string;
   timeoutMs: number;
   signal: AbortSignal;
 }

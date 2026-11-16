@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "heteromcp": {
+      "type": "stdio",
+      "command": "C:/Program Files/nodejs/node.exe",
+      "args": ["<ABSOLUTE_HETEMCP_ROOT>/dist/index.js"],
+      "env": {
+        "HETEMCP_AGENTS": "auto",
+        "HETEMCP_ARTIFACT_ROOT": "<ABSOLUTE_HETEMCP_ROOT>/.heteromcp/artifacts"
+      }
+    },
+    "heteromcp-http": {
+      "type": "http",
+      "url": "http://127.0.0.1:8787/mcp"
+    }
+  }
+}
