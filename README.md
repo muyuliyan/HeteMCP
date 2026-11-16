@@ -1,3 +1,5 @@
+**中文** · [English](README.en.md)
+
 # HeteMCP
 
 HeteMCP 是面向个人多模型工作流的、供应商无关的 MCP 编排服务。它在同一任务协议下调度 **Claude Code**、**Codex**、**DeepSeek Harness（DSH）** 或确定性 fake，并提供 **派遣（dispatch）**、**互检（mutual-check）** 与 **工作流（workflow / workflaw）** 三种执行模式。

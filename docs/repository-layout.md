@@ -13,6 +13,7 @@
 | `githooks/`                                               | `pre-push` 私有痕迹守卫                                | 保留                   |
 | `config/`                                                 | 无密钥任务示例、CC-switch 模板和版本固定的 DSH overlay | 保留                   |
 | `docs/`、`skill/heteromcp-context-governance/`            | 当前操作说明、架构与可复用治理规则                     | 保留                   |
+| `README.md` / `README.en.md`                              | 中英文操作入口                                         | 保留                   |
 | `package-lock.json`、`.env.example`                       | 依赖锁定与脱敏配置示例                                 | 保留                   |
 | `.heteromcp/artifacts/<task>/<attempt>/`                  | workspace、源码、报告、review JSON 和验收产物          | 忽略，按任务备份       |
 | `.heteromcp/runs/`                                        | 调度端任务记录快照，可能含完整 objective               | 忽略，按任务备份       |
